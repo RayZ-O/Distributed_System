@@ -1,7 +1,7 @@
 package main 
 
 import (
-"fmt"
+// "fmt"
 "crypto/sha256"
 "encoding/hex"
 "strings"
@@ -51,27 +51,27 @@ func main() {
     const charsetnum = "0123456789"
     const charsetalph = "abcdefghijklmnopqrstuvwxyz"
 
-    k := 6
-    text := "ruizhang;"
-
+    // k := 6
+    // text := "ruizhang;"
+    for { }
     // 2 char sets, 2 channels
     // num_consumers |    1    |    5    |   10    |    20   |    40   |   100   |  
     // ---------------------------------------------------------------------------
     //    time(s)    | 12.298s | 10.234s | 10.179s | 10.043s | 10.116s | 10.274s |
-    c1 := make(chan string) 
-    c2 := make(chan string) 
-    go produce(charsetnum, c1)
-    go produce(charsetalph, c2)
-    prefix := strings.Repeat("0", k)
-    found := make(chan string)    
-    num_consumers := 5
-    for i := 0; i < num_consumers; i++ {
-        go consume(c1, text, prefix, found)
-        go consume(c2, text, prefix, found)
-    }
+    // c1 := make(chan string) 
+    // c2 := make(chan string) 
+    // go produce(charsetnum, c1)
+    // go produce(charsetalph, c2)
+    // prefix := strings.Repeat("0", k)
+    // found := make(chan string)    
+    // num_consumers := 5
+    // for i := 0; i < num_consumers; i++ {
+    //     go consume(c1, text, prefix, found)
+    //     go consume(c2, text, prefix, found)
+    // }
 
-    result := <-found
-    fmt.Println(result, sha256Value(result))
+    // result := <-found
+    // fmt.Println(result, sha256Value(result))
 }
 
 // Other versions
