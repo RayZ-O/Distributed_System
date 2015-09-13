@@ -1,29 +1,26 @@
 import akka.actor.Actor
-import akka.actor.Props
-import akka.actor.ActorSystem
 import akka.actor.ActorRef
+import scala.math.BigInt
 
-
-class Master extends Actor {
-    import scala.collection.mutable.HashSet
-    var workers = new HashSet[ActorRef]()
-    val workproducer = new WorkProducer("ruizhang;", 10, 3)
+class Master(baseStr: String, workUnit: BigInt, workSize: BigInt, numZeros: Int) extends Actor {
+    val workproducer = new WorkProducer(baseStr, workUnit, workSize, numZeros)
+    import scala.collection.mutable.ArrayBuffer
+    var workers = new ArrayBuffer[ActorRef]()
+    var numJobs = workproducer.numJobs
+    var finishedJobs = BigInt(1);
     def receive = {
-          case WorkerReady => 
-              workers + sender
-              sender ! workproducer.nextJob
-
-          case Result(text, value) => 
-              println("\n" + text + " " + value + "\n")
-              workers foreach { (worker: ActorRef) => worker ! WorkComplete }
-              context.system.shutdown
-
-          case _ => println("Unknown message")
+          case ReadyToWork(nums) => 
+              workers += sender
+              val jobs = workproducer.nextWork(nums)
+              if (jobs.length > 0) {
+                sender ! Work(jobs)
+              } 
+          case WorkDone => 
+              finishedJobs = finishedJobs + 1
+              if (numJobs equals finishedJobs) {
+                  workers foreach { w => w ! WorkComplete}
+                  context.system.shutdown
+              }              
     }
 }
 
-object Main extends App {
-    val system = ActorSystem("BitcoinSystem")
-    val master = system.actorOf(Props[Master], name = "master")
-    val worker = system.actorOf(Props(classOf[Worker], master), name = "worker")
-}

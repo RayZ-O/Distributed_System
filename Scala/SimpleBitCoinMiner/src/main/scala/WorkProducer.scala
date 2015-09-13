@@ -1,25 +1,29 @@
-import akka.actor.Actor
-import scala.collection.mutable.HashMap
+import scala.math.BigInt
 
+class WorkProducer(baseStr: String, workUnit: BigInt, workSize: BigInt, numZeros: Int){
+    val prefix = "0" * numZeros                
+    var cur = BigInt(0)                               
 
-class WorkProducer(baseStr: String, suffixLen: Int, numZeros: Int){
-    // character set to compose the suffix
-    val charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-    val size = charset.length
-    val prefix = "0" * numZeros
-    // current random string length
-    var curLen = suffixLen
-    // current job Id                   
-    var curId = 0;                                
-
-    def nextJob() : Job = {
-        val job = Job(curId, baseStr + charset.charAt(curId % size), curLen, prefix)
-        curId = curId + 1
-        // increase random string length if all characters in the char set 
-        // have been used
-        if (curId % size == 0) {
-            curLen = curLen + 1
+    def nextWork(nums: Int): List[Job] = {
+        import scala.collection.mutable.ListBuffer
+        var tasks = ListBuffer[Job]()
+        var end = cur + workUnit
+        var i = 0
+        while (i < nums && end < workSize) {
+            tasks += Job(baseStr, cur, end, prefix)
+            cur = end 
+            end = cur + workUnit
+            i = i + 1
         }
-        job
+        if (i < nums && workSize - end > 0) {
+            tasks += Job(baseStr, cur, workSize, prefix)
+            cur = workSize
+        }
+        tasks.toList
+    }
+
+    def numJobs(): BigInt = {
+        val i = workSize / workUnit
+        if (workSize % workUnit == 0) i else i + 1
     }
 }
