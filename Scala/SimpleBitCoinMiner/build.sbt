@@ -1,3 +1,5 @@
+jarName in assembly := "project1.jar"
+
 name := "BitcointMiner"
      
 version := "1.0"
