@@ -20,7 +20,9 @@ class Master(baseStr: String, workUnit: BigInt, workSize: BigInt, numZeros: Int)
               if (numJobs equals finishedJobs) {
                   workers foreach { w => w ! WorkComplete}
                   context.system.shutdown
-              }              
+              }
+          case Result(res) =>
+              println(res)              
     }
 }
 

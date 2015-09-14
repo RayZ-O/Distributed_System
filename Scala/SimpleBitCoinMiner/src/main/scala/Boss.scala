@@ -29,6 +29,8 @@ class Boss(master: ActorRef) extends Actor with ActorLogging{
             master ! WorkDone
         case WorkComplete =>
             context.stop(self)
+        case res: Result =>
+            master ! res
         case Terminated(a) =>
             router = router.removeRoutee(a)
             val r = context.actorOf(Props[Miner])

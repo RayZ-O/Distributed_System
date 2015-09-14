@@ -15,7 +15,7 @@ class Miner extends Actor with ActorLogging{
                 randomText = baseStr ++ i.toString(36)
                 sha256 = randomText.sha256
                 if (sha256.hex.startsWith(prefix)) {
-                    println(randomText +"\t" + sha256.hex)
+                    sender ! Result(randomText +"\t" + sha256.hex)
                 }
                 i = i + 1
             }
