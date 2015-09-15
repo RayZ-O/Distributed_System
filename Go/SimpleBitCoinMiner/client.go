@@ -31,10 +31,10 @@ func main() {
     }    
     conn, err := net.Dial("tcp", os.Args[1] + ":5150")
     if err != nil {
-        fmt.Println("Can not connect to server")
+        fmt.Println("[ERROR]Can not connect to server")
         return
     }
-    fmt.Println("[Start client]");
+    fmt.Println("[INFO]Start client");
 
     reschan := make(chan Result)
     endchan := make(chan bool)
@@ -77,17 +77,17 @@ func doWork(conn net.Conn, reschan chan Result, endchan chan bool) {
         work := &Work{}
         err := decoder.Decode(work)
         if err != nil {
-            fmt.Println("Get work failed")         
+            fmt.Println("[ERROR]Failed to get work ")         
             endchan <- true
         }
         // only the complete message has work.StartVal = -1
         if work.StartVal == -1 {
-            fmt.Println("Work complete")
+            fmt.Println("[INFO]Work complete")
             endchan <- true
             return
         }
         mine(work.StartVal, work.EndVal, work.BaseStr, work.Prefix, conn, reschan)
-        fmt.Printf("Task %d finish\n", i);
+        fmt.Printf("[INFO]Task %d finished\n", i);
     }    
 }
 
@@ -97,7 +97,7 @@ func sendResult(conn net.Conn, reschan chan Result, endchan chan bool) {
         encoder := gob.NewEncoder(conn)
         err := encoder.Encode(<-reschan) 
         if err != nil {
-            fmt.Println("Send result failed")
+            fmt.Println("[ERROR]Failed to send result")
             endchan <- true
         }
     }    

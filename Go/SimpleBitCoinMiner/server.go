@@ -37,12 +37,13 @@ func main() {
     // start server
     ln, err := net.Listen("tcp", ":5150")
     if err != nil {
+	fmt.Println("[ERROR]Failed to start Server on 5150")
         return
     }
-    fmt.Println("Server is listening on 5150...")
+    fmt.Println("[INFO]Server is listening on 5150...")
     // produce work and assign to clients
     workchan := make(chan Work)
-    go produceWork(1000, 6300000, num0s, "ruizhang;", workchan)
+    go produceWork(5000, 6300000, num0s, "ruizhang;", workchan)
     for clientId := 0; ; clientId++{
         conn, err := ln.Accept()
         if err != nil {
@@ -75,11 +76,11 @@ func sendWork(c net.Conn, workchan chan Work, clientId int) {
         select {
         case work, ok := <-workchan:
             if ok {
-                fmt.Printf("Assigned work to [%d-%d] to client %d\n", work.StartVal, work.EndVal, clientId)
+                fmt.Printf("[INFO]Assigned work to [%d-%d] to client %d\n", work.StartVal, work.EndVal, clientId)
                 encoder := gob.NewEncoder(c)
                 err := encoder.Encode(work) 
                 if err != nil {
-                    fmt.Printf("Client %d disconnected, lost Job [%d-%d]\n", clientId, work.StartVal, work.EndVal)
+                    fmt.Printf("[ERROR]Client %d disconnected, lost Job [%d-%d]\n", clientId, work.StartVal, work.EndVal)
                     return
                 }
             } else {
@@ -87,7 +88,7 @@ func sendWork(c net.Conn, workchan chan Work, clientId int) {
                 encoder := gob.NewEncoder(c)
                 err := encoder.Encode(Work{-1, 0, "", ""}) 
                 if err != nil {
-                    fmt.Printf("Send complete message to client %d failed\n", clientId)
+                    fmt.Printf("[ERROR]Send complete message to client %d failed\n", clientId)
                 }
                 return
             }
@@ -103,7 +104,7 @@ func getResult(c net.Conn, clientId int) {
         res := &Result{}
         err := decoder.Decode(res)
         if err != nil {
-            fmt.Printf("Client %d disconnected\n", clientId)
+            fmt.Printf("[ERROR]Client %d disconnected\n", clientId)
             return
         }
         fmt.Println("[Coin]" + res.Str + " " + res.Hash)        
