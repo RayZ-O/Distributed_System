@@ -2,17 +2,17 @@ package main
 
 import (
 "fmt"
-"strconv"
 "math/rand"
 "time"
 )
 
-const numOfPeers = 5  // greater than 1
+const numOfPeers = 5 // greater than 1
 const threshold = 10
 
 type Message struct {
     msgType int
     content string
+    sender *Peer
 }
 
 type Peer struct {
@@ -24,46 +24,73 @@ type Peer struct {
 
 func (p Peer) Start(convergent chan bool) {
     msg := <-p.msgQueue
+    fmt.Printf("[KNOWS] Peer %d knows the roumor\n", p.id)
     p.count++
-    // fmt.Println("[NEW] Peer " + strconv.Itoa(p.id) + " knows the roumor")
-    go func (msg Message) {
-        for {
-            if p.count <= threshold {
-                // fmt.Println(p.count)
-                p.SendMessage(msg)
-            }
-            time.Sleep(100 * time.Millisecond)
-        }
+    p.ProcessMessage(msg)
+    p.SendMessage(msg.content)
+    p.Propagate(convergent, msg)
+}
 
-    } (msg)
+func (p Peer) Propagate(convergent chan bool, msg Message) {
     for {
         select {
-        case <-p.msgQueue:
-            p.count++
-            p.ProcessMessage(msg)
-            if p.count == threshold {
-                fmt.Println("[CONVERGE] Peer " + strconv.Itoa(p.id) + " converged")
-                convergent <- true
+        case m := <-p.msgQueue:
+            if m.msgType == 0 {
+                p.count++
+                p.ProcessMessage(m)
+                if p.count < threshold {
+                    p.SendMessage(m.content)
+                }
+                if p.count >= threshold {
+                    if p.count == threshold {
+                        fmt.Printf("[CONVERGE] Peer %d converged\n", p.id)
+                        convergent <- true
+                    }
+                    p.NotifyTerminate(m)
+                }
+            } else {
+                for i, n := range p.neighboor {
+                    if m.sender.id == n.id {
+                        p.neighboor = append(p.neighboor[:i], p.neighboor[i+1:]...)
+                        break;
+                    }
+                }
+                if len(p.neighboor) == 0 {
+                    p.count = threshold + 1
+                    fmt.Printf("[CONVERGE] Peer %d converged\n", p.id)
+                    convergent <- true
+                } else {
+                    p.SendMessage(m.content)
+                }
             }
         default:
-            time.Sleep(10 * time.Millisecond)
+            time.Sleep(100 * time.Millisecond)
         }
 
     }
 }
 
-func (p Peer) SendMessage(msg Message) {
+func (p Peer) SendMessage(content string) {
     i := rand.Intn(len(p.neighboor))
-    p.neighboor[i].msgQueue <- msg
+    p.neighboor[i].msgQueue <- Message{0, content, &p}
+}
+
+func (p Peer) SendTick() {
+    p.msgQueue <- Message{1, "Tick", &p}
 }
 
 func (p Peer) ProcessMessage(msg Message) {
-    // fmt.Println("Peer " + strconv.Itoa(p.id) + " receive " + msg.content + " [count=" + strconv.Itoa(p.count) + "]")
+    fmt.Printf("Peer %d receive %s from Peer %d\n" , p.id, msg.content, msg.sender.id)
+}
+
+func (p Peer) NotifyTerminate(msg Message) {
+    msg.sender.msgQueue <- Message{2, msg.content, &p}
+    fmt.Printf("Peer %d notify terminate to %d\n", p.id, msg.sender.id)
 }
 
 func BuildFUllNetwork(peers []Peer) {
-    for i :=0; i < numOfPeers; i++ {
-        for j :=0; j < numOfPeers; j++ {
+    for i :=1; i < numOfPeers + 1; i++ {
+        for j :=1; j < numOfPeers + 1; j++ {
             if j != i {
                 peers[i].neighboor = append(peers[i].neighboor, peers[j])
             }
@@ -71,36 +98,24 @@ func BuildFUllNetwork(peers []Peer) {
     }
 }
 
-func BuildLine(peers []Peer) {
-    peers[0].neighboor = append(peers[0].neighboor, peers[1])
-    for i :=1; i < numOfPeers - 1; i++ {
-        peers[i].neighboor = append(peers[i].neighboor, peers[i - 1])
-        peers[i].neighboor = append(peers[i].neighboor, peers[i + 1])
-    }
-    peers[numOfPeers - 1].neighboor = append(peers[numOfPeers - 1].neighboor, peers[numOfPeers - 2])
-}
-
 func main() {
     // create peers
-    var peers [numOfPeers]Peer
-    for i :=0; i < numOfPeers; i++ {
+    var peers [numOfPeers + 1]Peer
+    for i := 0; i < numOfPeers + 1; i++ {
         peers[i] = Peer{id:i, count:0, msgQueue:make(chan Message)}
     }
-    mainp := Peer{id:-1, count:0, msgQueue:make(chan Message)}
     // build topology
     BuildFUllNetwork(peers[:])
-    // BuildLine(peers[:])
-    for i :=0; i < numOfPeers; i++ {
-        mainp.neighboor = append(mainp.neighboor, peers[i])
+    for i := 1; i < numOfPeers + 1; i++ {
+        peers[0].neighboor = append(peers[0].neighboor, peers[i])
     }
-
     convergent := make(chan bool)
     rand.Seed( time.Now().UTC().UnixNano())
-    go mainp.SendMessage(Message{0, "Hello, I am main process"})
-    for i :=0; i < numOfPeers; i++ {
+    for i := 1; i < numOfPeers + 1; i++ {
         go peers[i].Start(convergent)
     }
-    for i :=0; i < numOfPeers; i++ {
+    peers[0].SendMessage("Hello, I am main process")
+    for i := 0; i < numOfPeers; i++ {
         <-convergent
     }
 }
