@@ -1,6 +1,6 @@
 jarName in assembly := "project2.jar"
 
-name := "BitcointMiner"
+name := "GossipSimulator"
      
 version := "1.0"
      
