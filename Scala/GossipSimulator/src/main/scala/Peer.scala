@@ -32,7 +32,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
             println(s"[Start] Peer $id knows the roumor")
             state = content
             sender ! Confirm
-            context.become(start)
+            context.become(gossip)
 
         case Neighbour(ne) =>
             neighbours += ne
@@ -40,9 +40,10 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
         case _ => // do nothing
     }
 
-    def start: Receive = {
+    def gossip: Receive = {
         case Tick =>
             propogate()
+
         case Gossip(content) =>
             // println(s"Peer $id receive")
             sender ! Confirm
@@ -53,6 +54,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
                 tick.cancel()
                 context.become(stop)
             }
+
         case Neighbour(ne) =>
             neighbours += ne
     }
@@ -60,6 +62,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
     def stop: Receive = {
         case g: Gossip=>
             sender ! Stopped
+
         case Neighbour(ne) =>
             throw new NotImplementedError("Add neighbours to stopped peer not yet implemented")
     }
@@ -78,10 +81,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
                         if (neighbours.length == 0) {
                             context.become(stop)
                             println(s"[Stop] Peer $id is isolated")
-                        } else {
-                            self ! Gossip(state)
                         }
-
                 }
             case Failure(e) => e.printStackTrace
         }

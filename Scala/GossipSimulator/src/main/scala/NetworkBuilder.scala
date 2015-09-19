@@ -9,6 +9,10 @@ class NetworkBuilder() {
 
             case "line" => buildLine(peers)
 
+            case "3D" => build3DGrid(peers)
+
+            case "imp3D" => buildImperfect3DGrid(peers)
+
             case "ring" => buildRing(peers)
 
             case _ => throw new NotImplementedError(s"Build $network not yet implemented")
@@ -43,5 +47,15 @@ class NetworkBuilder() {
         peers(0) ! Neighbour(peers(end))
         peers(peers.length - 1) ! Neighbour(peers(end - 1))
         peers(peers.length - 1) ! Neighbour(peers(0))
+    }
+
+    def build3DGrid(peers: ArrayBuffer[ActorRef]) = {
+        // TODO
+    }
+
+    // Grid arrangement but one random other neighboor is selected
+    // from the list of all actors (4+1 neighboors)
+    def buildImperfect3DGrid(peers: ArrayBuffer[ActorRef]) = {
+        // TODO
     }
 }
