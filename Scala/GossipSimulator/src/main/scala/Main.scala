@@ -9,19 +9,20 @@ object Main {
     def main(args: Array[String]): Unit = {
         val system = ActorSystem("GossipSystem")
 
-        val threshold = 10
-        val numOfPeers = 10
+        val threshold = 3
+        val numOfPeers = 100
 
         var peers = new ArrayBuffer[ActorRef]
-        for (i <- 0 until numOfPeers) {
+        for (i <- 1 to numOfPeers) {
             peers += system.actorOf(Props(classOf[Peer], i, threshold), s"peer$i")
         }
 
         val networkBuilder = new NetworkBuilder()
-        networkBuilder.build("ring", peers)
+        networkBuilder.build("full", peers)
 
         val inbox = Inbox.create(system)
-        inbox.send(peers(0), Gossip("Hi from main"))
+        // inbox.send(peers(0), Gossip("Hi from main"))
+        inbox.send(peers(0), PushSum(0, 1))
 
     }
 }

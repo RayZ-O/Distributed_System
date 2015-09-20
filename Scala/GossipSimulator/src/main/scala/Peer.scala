@@ -5,13 +5,11 @@ import akka.util.Timeout
 import scala.util.Random
 import scala.util.Success
 import scala.util.Failure
-import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.concurrent.Await
 
 case object Tick
-case object Confirm
 case object Stopped
+case class Confirm(state: Any)
 case class Neighbour(neighbour: ActorRef)
 case class Gossip(content: String)
 case class PushSum(s: Double, w: Double)
@@ -35,14 +33,16 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
         case Gossip(content) =>
             println(s"[Start] Peer $peerId knows the roumor")
             info = content
-            sender ! Confirm
+            sender ! Confirm(Gossip(content))
             context.become(gossip)
 
         case ps: PushSum =>
+            sender ! Confirm(PushSum(s / 2, w / 2))
+            s /= 2
+            w /= 2
             s += ps.s
             w += ps.w
             ratio = s / w
-            sender ! Confirm
             context.become(pushsum)
 
         case Neighbour(ne) =>
@@ -57,7 +57,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
 
         case Gossip(content) =>
             // println(s"Peer $peerId receive")
-            sender ! Confirm
+            sender ! Confirm(Gossip(content))
             if (terminateCnt < threshold) {
                 terminateCnt += 1
             } else {
@@ -75,7 +75,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
             propagate(PushSum(s / 2, w / 2))
             s /= 2
             w /= 2
-            val newRatio = s.toDouble / w
+            val newRatio = s / w
             // println(s"Peer $peerId sum estimate $newRatio")
             if ((newRatio - ratio).abs < 1e-10) {
                 terminateCnt += 1
@@ -88,9 +88,11 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
             ratio = newRatio
 
         case ps: PushSum =>
+            sender ! Confirm(PushSum(s / 2, w / 2))
+            s /= 2
+            w /= 2
             s += ps.s
             w += ps.w
-            sender ! Confirm
 
         case _ => // do nothing
     }
@@ -114,7 +116,8 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
         future.onComplete {
             case Success(value) =>
                 value match {
-                    case Confirm => //println("Gossip success")
+                    case Confirm(state) => updateState(state)
+
                     case Stopped =>
                         neighbours.remove(i)
                         if (neighbours.length == 0) {
@@ -122,7 +125,18 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
                             println(s"[Stop] Peer $peerId is isolated")
                         }
                 }
+
             case Failure(e) => e.printStackTrace
+        }
+    }
+
+    def updateState(state: Any) = {
+        state match {
+            case ps: PushSum =>
+                s += ps.s
+                w += ps.w
+            case g: Gossip =>  //println("Gossip success")
+            case _ => throw new NotImplementedError("Confirm message state not yet implemented")
         }
     }
 
