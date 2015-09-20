@@ -11,28 +11,39 @@ import scala.concurrent.Await
 
 case object Tick
 case object Confirm
+case object Stopped
 case class Neighbour(neighbour: ActorRef)
 case class Gossip(content: String)
-case object Stopped
-
+case class PushSum(s: Double, w: Double)
 
 class Peer(idnum: Int, threshold: Int) extends Actor {
 
-    var state = ""
-    var receiveCnt = 0;
-    val id = idnum
+    val peerId = idnum
     import scala.collection.mutable.ArrayBuffer
     var neighbours = new ArrayBuffer[ActorRef]
+
+    var info = ""  // use for information propagation
+    var s = idnum.toDouble
+    var w = 0.0
+    var ratio = 0.0
+    var terminateCnt = 0;
 
     import context.dispatcher
     val tick = context.system.scheduler.schedule(500.millis, 500.millis, self, Tick)
 
     def receive = {
         case Gossip(content) =>
-            println(s"[Start] Peer $id knows the roumor")
-            state = content
+            println(s"[Start] Peer $peerId knows the roumor")
+            info = content
             sender ! Confirm
             context.become(gossip)
+
+        case ps: PushSum =>
+            s += ps.s
+            w += ps.w
+            ratio = s / w
+            sender ! Confirm
+            context.become(pushsum)
 
         case Neighbour(ne) =>
             neighbours += ne
@@ -42,15 +53,15 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
 
     def gossip: Receive = {
         case Tick =>
-            propogate()
+            propagate(Gossip(info))
 
         case Gossip(content) =>
-            // println(s"Peer $id receive")
+            // println(s"Peer $peerId receive")
             sender ! Confirm
-            if (receiveCnt < threshold) {
-                receiveCnt += 1
+            if (terminateCnt < threshold) {
+                terminateCnt += 1
             } else {
-                println(s"[Stop] Peer $id stopped")
+                println(s"[Stop] Peer $peerId stopped")
                 tick.cancel()
                 context.become(stop)
             }
@@ -59,18 +70,46 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
             neighbours += ne
     }
 
+    def pushsum: Receive = {
+        case Tick =>
+            propagate(PushSum(s / 2, w / 2))
+            s /= 2
+            w /= 2
+            val newRatio = s.toDouble / w
+            // println(s"Peer $peerId sum estimate $newRatio")
+            if ((newRatio - ratio).abs < 1e-10) {
+                terminateCnt += 1
+            }
+            if (terminateCnt >= 3) {
+                println(s"[Stop] Peer $peerId stopped, sum is $ratio")
+                tick.cancel()
+                context.become(stop)
+            }
+            ratio = newRatio
+
+        case ps: PushSum =>
+            s += ps.s
+            w += ps.w
+            sender ! Confirm
+
+        case _ => // do nothing
+    }
+
     def stop: Receive = {
-        case g: Gossip=>
+        case g: Gossip =>
+            sender ! Stopped
+
+        case ps: PushSum =>
             sender ! Stopped
 
         case Neighbour(ne) =>
             throw new NotImplementedError("Add neighbours to stopped peer not yet implemented")
     }
 
-    def propogate(): Unit = {
+    def propagate(msg: Any): Unit = {
         val i = Random.nextInt(neighbours.length)
         implicit val timeout = Timeout(400.milliseconds)
-        val future = ask(neighbours(i), Gossip(state))
+        val future = ask(neighbours(i), msg)
         import context.dispatcher // implicit ExecutionContext for future
         future.onComplete {
             case Success(value) =>
@@ -80,7 +119,7 @@ class Peer(idnum: Int, threshold: Int) extends Actor {
                         neighbours.remove(i)
                         if (neighbours.length == 0) {
                             context.become(stop)
-                            println(s"[Stop] Peer $id is isolated")
+                            println(s"[Stop] Peer $peerId is isolated")
                         }
                 }
             case Failure(e) => e.printStackTrace
