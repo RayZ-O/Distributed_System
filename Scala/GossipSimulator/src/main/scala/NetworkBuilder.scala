@@ -1,8 +1,7 @@
 import akka.actor.ActorRef
 import scala.collection.mutable.ArrayBuffer
-import scala.math.cbrt
+import scala.math
 import scala.util.Random
-import scala.sys
 
 class NetworkBuilder() {
 
@@ -15,6 +14,10 @@ class NetworkBuilder() {
             case "3D" => build3DGrid(peers)
 
             case "imp3D" => buildImperfect3DGrid(peers)
+
+            case "2D" => build2DGrid(peers)
+
+            case "imp2D" => buildImperfect2DGrid(peers)
 
             case "ring" => buildRing(peers)
 
@@ -52,8 +55,49 @@ class NetworkBuilder() {
         peers(peers.length - 1) ! Neighbour(peers(0))
     }
 
+    // check is length a root number
+    def checkSize(length: Int, rootFunc: (Double) => Double): Int = {
+        val size = rootFunc(length)
+        if (!size.isValidInt) {
+            throw new IllegalArgumentException("Number of peers must be cubic number in 3D gird")
+        } else {
+            size.toInt
+        }
+    }
+
+    // convert 2D position to 1D position
+    def map2DTo1D(x: Int, y: Int, size: Int): Int = {
+        x + y * size
+    }
+
+    def build2DGrid(peers: ArrayBuffer[ActorRef]) = {
+        val size = checkSize(peers.length, math.sqrt)
+        for(i <- 0 until size; j <- 0 until size) {
+            if (j > 0)        peers(map2DTo1D(j, i, size)) ! Neighbour(peers(map2DTo1D(j - 1, i, size)))
+            if (j < size - 1) peers(map2DTo1D(j, i, size)) ! Neighbour(peers(map2DTo1D(j + 1, i, size)))
+            if (i > 0)        peers(map2DTo1D(j, i, size)) ! Neighbour(peers(map2DTo1D(j, i - 1, size)))
+            if (i < size - 1) peers(map2DTo1D(j, i, size)) ! Neighbour(peers(map2DTo1D(j, i + 1, size)))
+        }
+    }
+
+    // Grid arrangement but one random other neighboor is selected
+    // from the list of all actors (4+1 neighboors)
+    def buildImperfect2DGrid(peers: ArrayBuffer[ActorRef]) = {
+        build2DGrid(peers)
+        val size = math.sqrt(peers.length).toInt
+        for(i <- 0 until size; j <- 0 until size) {
+            val random = Random.nextInt(peers.length)
+            peers(map2DTo1D(j, i, size)) ! Neighbour(peers(random))
+        }
+    }
+
+    // convert 3D position to 1D position
+    def map3DTo1D(x: Int, y: Int, z: Int, size: Int): Int = {
+        x + y * size + z * size * size
+    }
+
     def build3DGrid(peers: ArrayBuffer[ActorRef]) = {
-         val size = checkCubic(peers.length)
+        val size = checkSize(peers.length, math.cbrt)
         for(i <- 0 until size; j <- 0 until size; k <- 0 until size) {
             if (k > 0)        peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k - 1, j, i, size)))
             if (k < size - 1) peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k + 1, j, i, size)))
@@ -67,31 +111,11 @@ class NetworkBuilder() {
     // Grid arrangement but one random other neighboor is selected
     // from the list of all actors (6+1 neighboors)
     def buildImperfect3DGrid(peers: ArrayBuffer[ActorRef]) = {
-        val size = checkCubic(peers.length)
+        build3DGrid(peers)
+        val size = math.cbrt(peers.length).toInt
         for(i <- 0 until size; j <- 0 until size; k <- 0 until size) {
-            if (k > 0)        peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k - 1, j, i, size)))
-            if (k < size - 1) peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k + 1, j, i, size)))
-            if (j > 0)        peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k, j - 1, i, size)))
-            if (j < size - 1) peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k, j + 1, i, size)))
-            if (i > 0)        peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k, j, i - 1, size)))
-            if (i < size - 1) peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(map3DTo1D(k, j, i + 1, size)))
             val random = Random.nextInt(peers.length)
             peers(map3DTo1D(k, j, i, size)) ! Neighbour(peers(random))
         }
-    }
-
-    // check is length a cubic number
-    def checkCubic(length: Int): Int = {
-        val size = cbrt(length)
-        if (!size.isValidInt) {
-            throw new IllegalArgumentException("Number of peers must be cubic number in 3D gird")
-        } else {
-            size.toInt
-        }
-    }
-
-    // convert 3D position to 1D position
-    def map3DTo1D(x: Int, y: Int, z: Int, size: Int): Int = {
-        x + y * size + z * size * size
     }
 }
