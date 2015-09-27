@@ -4,6 +4,7 @@ import scala.util.Random
 import scala.concurrent.duration._
 
 case object Tick
+case object Confirm
 case object Stopped
 case class Neighbour(neighbour: ActorRef)
 case class Gossip(content: String)
@@ -15,24 +16,27 @@ class Peer(idnum: Int, threshold: Int, master: ActorRef) extends Actor {
     import scala.collection.mutable.ArrayBuffer
     var neighbours = new ArrayBuffer[ActorRef]
 
-    var received = false;
     var info = ""  // use for information propagation
     var s = idnum.toDouble
-    var w = 1.0
+    var w = 0.0
     var terminateCnt = 0;
 
     import context.dispatcher
-    val tick = context.system.scheduler.schedule(500.millis, 500.millis, self, Tick)
+    val tick = context.system.scheduler.schedule(10.millis, 10.millis, self, Tick)
 
     def receive = {
         case Gossip(content) =>
-            // println(s"[Start] Peer $peerId knows the roumor")
             info = content
             context.become(gossip)
 
         case ps: PushSum =>
-            updateState(ps.s, ps.w)
-            propagate(PushSum(s, w))
+            tick.cancel()
+            s += ps.s
+            w += ps.w
+            s /= 2
+            w /= 2
+            val i = Random.nextInt(neighbours.length)
+            neighbours(i) ! PushSum(s, w)
             context.become(pushsum)
 
         case Neighbour(ne) =>
@@ -43,7 +47,8 @@ class Peer(idnum: Int, threshold: Int, master: ActorRef) extends Actor {
 
     def gossip: Receive = {
         case Tick =>
-            propagate(Gossip(info))
+            val i = Random.nextInt(neighbours.length)
+            neighbours(i) ! Gossip(info)
 
         case Gossip(content) =>
             // println(s"Peer $peerId receive")
@@ -51,6 +56,7 @@ class Peer(idnum: Int, threshold: Int, master: ActorRef) extends Actor {
                 terminateCnt += 1
             } else {
                 println(s"[Stop] Peer $peerId stopped")
+                neighbours foreach { _ ! Stopped }
                 master ! Stopped
                 terminate()
             }
@@ -58,8 +64,8 @@ class Peer(idnum: Int, threshold: Int, master: ActorRef) extends Actor {
         case Stopped =>
             neighbours -= sender
             if (neighbours.length == 0) {
-                master ! Stopped
                 println(s"[Stop] Peer $peerId is isolated")
+                master ! Stopped
                 terminate()
             }
 
@@ -67,20 +73,15 @@ class Peer(idnum: Int, threshold: Int, master: ActorRef) extends Actor {
     }
 
     def pushsum: Receive = {
-        case Tick =>
-            // if (!received) {
-            //     updateState(0, 0)
-            //     self ! PushSum(s, w)
-            // }
-            // received = false
-
         case ps: PushSum =>
-            received = true
             val ratio = s / w
-            updateState(ps.s, ps.w)
+            s += ps.s
+            w += ps.w
             val newRatio = s / w
-            propagate(PushSum(s, w))
-            //println(s"Peer $peerId sum estimate $newRatio")
+            s /= 2
+            w /= 2
+            val i = Random.nextInt(neighbours.length)
+            neighbours(i) ! PushSum(s, w)
             if ((newRatio - ratio).abs < 1e-10) {
                 terminateCnt += 1
             } else {
@@ -88,35 +89,31 @@ class Peer(idnum: Int, threshold: Int, master: ActorRef) extends Actor {
             }
             if (terminateCnt >= 3) {
                 println(s"[Stop] Peer $peerId stopped, sum is $ratio")
+                neighbours foreach { _ ! Stopped }
                 master ! Stopped
-                terminate()
+                context.become(stop)
             }
 
+        case Stopped =>
+            println(s"[Stop] Peer $peerId stopped, sum is ${s/w}")
+            neighbours foreach { _ ! Stopped }
+            master ! Stopped
+            context.become(stop)
 
-        case _ => // do nothing
+        case _ => //println("Unhandle message in pushsum")
     }
 
     def stop: Receive = {
-        case g: Gossip => sender ! Stopped
-        case _  => // do nothing
-    }
-
-    def propagate(msg: Any): Unit = {
-        val i = Random.nextInt(neighbours.length)
-        neighbours(i) ! msg
+        case g: Gossip =>
+            sender ! Stopped
+        case _  => //println("Unhandle message in stop")
     }
 
     def terminate() = {
         tick.cancel()
         context.become(stop)
     }
-
-    def updateState(ns: Double, nw: Double) {
-        s += ns
-        w += nw
-        s /= 2
-        w /= 2
-    }
 }
+
 
 
