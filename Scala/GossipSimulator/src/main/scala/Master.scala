@@ -12,12 +12,12 @@ class Master(numOfPeers: Int) extends Actor {
         case Stopped =>
             count += 1
             if (count % 10000 == 0) {
-                println(s"$count peers converge")
+             //   println(s"$count peers converge")
             }
             if (count == numOfPeers) {
                 val time = System.currentTimeMillis - start
        	        println(s"$numOfPeers peers spent $time ms")
-	            Thread.sleep(1000)
+                Thread.sleep(1000)
                 context.system.shutdown
             }
 

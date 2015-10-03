@@ -29,7 +29,7 @@ object Main {
         inbox.send(master, Start)
         algorithm match {
             case "gossip" => inbox.send(peer0, Gossip("Hi from main"))
-            case "push-sum" => inbox.send(peer0, PushSum(0, 1))
+            case "push-sum" => inbox.send(peer0, PushSum(0, 0))
             case _ => throw new NotImplementedError("Algorithm not implemented")
         }
     }
