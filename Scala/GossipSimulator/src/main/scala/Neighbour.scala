@@ -8,7 +8,6 @@ class Neighbour(idnum: Int, numOfPeers: Int, topology: String) {
     val size = math.round(math.cbrt(numOfPeers)).toInt
     val neighbour = buildNeighbour()
 
-
     def getRandomName(): String = {
         var i = idnum
         while (i == idnum) {

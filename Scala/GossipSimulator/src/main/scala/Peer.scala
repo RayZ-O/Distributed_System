@@ -8,7 +8,7 @@ case object Convergent
 case class Gossip(content: String)
 case class PushSum(s: Double, w: Double)
 
-class Peer(idnum: Int, numOfPeers: Int, topology: String, master: ActorRef) extends Actor {
+class Peer(idnum: Int, numOfPeers: Int, topology: String) extends Actor {
 
     val peerId = idnum
     // internal state
@@ -22,7 +22,7 @@ class Peer(idnum: Int, numOfPeers: Int, topology: String, master: ActorRef) exte
     // terminate threshold
     val gossipThreshold = 10
     val pushsumThreshold = 10
-    val desolateThreshold = 20
+    val desolateThreshold = 10
 
     val neighbour = new Neighbour(idnum, numOfPeers, topology)
 
@@ -40,6 +40,10 @@ class Peer(idnum: Int, numOfPeers: Int, topology: String, master: ActorRef) exte
             w += ps.w
             ratio = s / w
             context.become(pushsum)
+
+        case Failed =>
+            tick.cancel()
+            context.become(failed)
 
         case _ => // do nothing
     }
@@ -92,6 +96,10 @@ class Peer(idnum: Int, numOfPeers: Int, topology: String, master: ActorRef) exte
         case _  => //println("Unhandle message in stop")
     }
 
+     def failed: Receive = {
+        case _  => //println("Unhandle message in failed")
+    }
+
     def checkTerminate(cnt: Int, threshold: Int) = {
         if (cnt >= threshold) {
             // println(s"[Stop] Peer $peerId terminate, info: $info, average: ${s/w}")
@@ -100,7 +108,7 @@ class Peer(idnum: Int, numOfPeers: Int, topology: String, master: ActorRef) exte
     }
 
     def terminate() = {
-        master ! Stopped
+        context.actorSelection("../profiler") ! Stopped
         tick.cancel()
         context.become(stop)
     }
