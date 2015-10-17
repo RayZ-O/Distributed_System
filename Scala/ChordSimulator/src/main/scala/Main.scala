@@ -10,13 +10,10 @@ object Main {
         }
         val numOfPeers = args(0).toInt
         val numOfReqs = args(1).toInt     
-        val netBuilder = system.actorOf(Props[NetworkBuilder])
-        val m = 10
-        for (i <- 0 until numOfPeers) {
-            system.actorOf(Props(classOf[Peer], m), s"peer$i")
-        }           
+        val netBuilder = system.actorOf(Props[NetworkBuilder], "networkbuilder")
+        
         
         val inbox = Inbox.create(system)
-        inbox.send(netBuilder, Start(numOfPeers))
+        inbox.send(netBuilder, Build(numOfPeers))
     }
 }
