@@ -16,7 +16,7 @@ case class Join(id: Int, path: ActorPath)
 case object JoinComplete
 
 class NetworkBuilder extends Actor {
-    val m = 3
+    val m = 16
     import scala.collection.mutable.HashMap
     val idNameMap = new HashMap[Int, String]
     var nodes: Vector[Tuple2[Int, String]] = _
@@ -38,6 +38,7 @@ class NetworkBuilder extends Actor {
                 }
                 context.actorOf(Props(classOf[Peer], id), s"peer$i")
             }
+
             nodes = idNameMap.toVector
             val firstPeer = context.actorSelection(nodes(0)._2)
             firstPeer ! RemoteProcedureCall(JOIN, List(nodes(0)._1, null))

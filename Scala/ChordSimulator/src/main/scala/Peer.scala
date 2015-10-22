@@ -26,7 +26,7 @@ class Peer(id: Int) extends Actor {
 
     override def receive = {
         case RemoteProcedureCall(procedure, args) =>
-            println(self.path.name + " receive from " + sender.path)
+//            println(self.path.name + " receive from " + sender.path)
             handleRemoteCall(procedure, args, sender)
 
         case Print =>
@@ -128,7 +128,8 @@ class Peer(id: Int) extends Actor {
 
             case JOIN =>
                 join(args(0).asInstanceOf[Int], args(1).asInstanceOf[ActorPath])
-                Thread.sleep(2000)
+                printFingerTable()
+//                Thread.sleep(2000)
                 sender ! JoinComplete
 
             case UPDATE_FINGER_TABLE => updateFingerTable(args(0).asInstanceOf[Node], args(1).asInstanceOf[Int])
@@ -142,6 +143,7 @@ class Peer(id: Int) extends Actor {
     // n is current number of nodes inside the network
     def join(id: Int, path: ActorPath) = {
        buildInterval()
+//       printFingerTable()
        if (path != null) {
            initFingerTable(Node(id, path))
            println(s"$chordId Init table complete")
@@ -162,7 +164,7 @@ class Peer(id: Int) extends Actor {
         successor = fingerTable(0).node
         predecessor = call(successor, GET_PREDECESSOR, null, true)
         call(successor, SET_PREDECESSOR, List(selfNode), false)
-        call(predecessor, SET_SUCCESSOR, List(selfNode), false)
+//        call(predecessor, SET_SUCCESSOR, List(selfNode), false)
         for (i <- 0 until m_exponent - 1) {
             // finger[i+1].start in [chordId, finger[i].node)
             if (Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(fingerTable(i + 1).interval.start)) {
@@ -247,7 +249,7 @@ class Peer(id: Int) extends Actor {
         var curNode = selfNode
         var succNode = successor
         while (!Interval(curNode.id, succNode.id, OPEN, CLOSED).contains(nodeId)) { // nodeId not in (n, n.succesor]
-            println(chordId + " find " + nodeId + " in " + Interval(curNode.id, succNode.id, OPEN, CLOSED))
+//            println(chordId + " find " + nodeId + " in " + Interval(curNode.id, succNode.id, OPEN, CLOSED))
            curNode = call(curNode, CLOSEST_PRECEDING_FINGER, List(nodeId), true)
            succNode = call(curNode, GET_SUCCESSOR, null, true)
         }
@@ -258,7 +260,7 @@ class Peer(id: Int) extends Actor {
         for (i <- m_exponent - 1 to 0 by -1) {
             val gtNode = fingerTable(i).node
             // finger[i].node in [id, nodeId)
-            if (Interval(chordId, nodeId, CLOSED, OPEN).contains(gtNode.id)) {
+            if (Interval(chordId, nodeId, OPEN, OPEN).contains(gtNode.id)) {
 
                 return gtNode
             }
@@ -315,6 +317,7 @@ object Peer  {
         override def toString() = {
             val prefix = if (left == OPEN) "(" else "["
             val suffix = if (right == OPEN) ")" else "]"
+
             prefix + s"$start, $end" + suffix
         }
 
