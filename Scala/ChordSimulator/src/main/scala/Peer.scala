@@ -90,7 +90,7 @@ class Peer(id: Int) extends Actor {
                 implicit val timeout = Timeout(Duration(5000, "millis"))
                 import context.dispatcher // implicit ExecutionContext for future
                 val future = nodeSelection ? RemoteProcedureCall(procedure, args)
-                val reply = Await.result(future, Duration(1000, "millis")).asInstanceOf[RemoteReply]
+                val reply = Await.result(future, Duration(500, "millis")).asInstanceOf[RemoteReply]
                 reply.node
             } catch {
                 case te: TimeoutException =>
@@ -129,8 +129,8 @@ class Peer(id: Int) extends Actor {
 
             case JOIN =>
                 join(args(0).asInstanceOf[Int], args(1).asInstanceOf[ActorPath])
-                Thread.sleep(1000)
-                println(s"$chordId complete")
+//                Thread.sleep(1000)
+//                println(s"$chordId complete")
                 sender ! JoinComplete
 
             case UPDATE_FINGER_TABLE => updateFingerTable(args(0).asInstanceOf[Node], args(1).asInstanceOf[Int])
@@ -148,7 +148,7 @@ class Peer(id: Int) extends Actor {
        if (path != null) {
            initFingerTable(Node(id, path))
 //           println(s"$chordId Init table complete")
-           printFingerTable()
+//           printFingerTable()
            updateOthers()
            // move key in (predecessor, n] from successor
        } else {

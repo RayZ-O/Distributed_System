@@ -1,12 +1,13 @@
-import akka.actor.{ Actor, Props, ActorPath }
+import akka.actor.{ Actor, Props, ActorPath, ActorSelection }
 import akka.util.Timeout
 import akka.pattern.ask
+
 import scala.math.BigInt
 import scala.util.Random
 import scala.concurrent.duration._
 import scala.concurrent.Await
+
 import com.roundeights.hasher.Implicits._
-import akka.actor.ActorSelection
 
 import Peer.RemoteProcedureCall
 import Peer.Procedure.JOIN
@@ -17,9 +18,8 @@ case object JoinComplete
 
 class NetworkBuilder extends Actor {
     val m = 16
-    import scala.collection.mutable.HashMap
-    val idNameMap = new HashMap[Int, String]
-    var nodes: Vector[Tuple2[Int, String]] = _
+    import scala.collection.mutable.ArrayBuffer
+    var nodes= ArrayBuffer[Tuple2[Int, String]]()
     var numNodes = 0
     var joinedCount = 0
 
@@ -27,18 +27,12 @@ class NetworkBuilder extends Actor {
         case Build(num) =>
             numNodes = num
             Peer.setMExponent(m)
-            for (i <- 1 to num) {
-                val name = s"peer$i"
-                val id = (BigInt(name.sha1.hex.substring(0, 20), 16) % BigInt(2).pow(m)).toInt
-                println(id)
-                if (idNameMap.contains(id)) {
-                    throw new IllegalArgumentException("ID collision! Please change m or reduce number of peers")
-                } else {
-                    idNameMap += (id->name)
-                }
-                context.actorOf(Props(classOf[Peer], id), s"peer$i")
+            val randomIds = Random.shuffle((1 to (numNodes * 5)).toVector)
+            for (i <- 0 until numNodes) {
+                val id = randomIds(i)
+                context.actorOf(Props(classOf[Peer], id), s"peer$id")
+                nodes += ((id, s"peer$id"))
             }
-            nodes = idNameMap.toVector
             val firstPeer = context.actorSelection(nodes(0)._2)
             firstPeer ! RemoteProcedureCall(JOIN, List(nodes(0)._1, null))
             joinedCount += 1
@@ -52,10 +46,10 @@ class NetworkBuilder extends Actor {
                 joinedCount += 1
             } else {
                 // TODO send request
-                for (n <- nodes) {
-                    context.actorSelection(n._2) ! Print
-                    Thread.sleep(1000)
-                }
+//                for (n <- nodes) {
+//                    context.actorSelection(n._2) ! Print
+//                    Thread.sleep(1000)
+//                }
                 context.system.shutdown();
 
             }
