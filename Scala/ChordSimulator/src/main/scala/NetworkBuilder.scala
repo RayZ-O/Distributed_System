@@ -38,14 +38,12 @@ class NetworkBuilder extends Actor {
                 }
                 context.actorOf(Props(classOf[Peer], id), s"peer$i")
             }
-
             nodes = idNameMap.toVector
             val firstPeer = context.actorSelection(nodes(0)._2)
             firstPeer ! RemoteProcedureCall(JOIN, List(nodes(0)._1, null))
             joinedCount += 1
 
         case JoinComplete =>
-            println(s"$joinedCount complete")
             if (joinedCount < numNodes) {
                 val random = Random.nextInt(joinedCount)
                 val peer = context.actorSelection(nodes(joinedCount)._2)
@@ -54,8 +52,12 @@ class NetworkBuilder extends Actor {
                 joinedCount += 1
             } else {
                 // TODO send request
+                for (n <- nodes) {
+                    context.actorSelection(n._2) ! Print
+                    Thread.sleep(1000)
+                }
+                context.system.shutdown();
 
-                 context.actorSelection("/user/networkbuilder/*") ! Print
             }
 
         case _ =>

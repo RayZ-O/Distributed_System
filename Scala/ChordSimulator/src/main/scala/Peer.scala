@@ -1,11 +1,11 @@
 import akka.actor.{ Actor, ActorRef, ActorPath }
-
 import akka.util.Timeout
 import akka.pattern.ask
 import scala.concurrent.duration._
 import scala.concurrent.Await
 import scala.util.{ Random, Success, Failure }
 import scala.collection.mutable.ArrayBuffer
+import java.util.concurrent.TimeoutException
 
 case object Print;
 
@@ -18,6 +18,7 @@ class Peer(id: Int) extends Actor {
     import Peer.Procedure._
     import Interval.EndPoint.CLOSED
     import Interval.EndPoint.OPEN
+
 
     val selfNode = Node(chordId, self.path)
     val fingerTable= new ArrayBuffer[FingerEntry]
@@ -92,10 +93,10 @@ class Peer(id: Int) extends Actor {
                 val reply = Await.result(future, Duration(1000, "millis")).asInstanceOf[RemoteReply]
                 reply.node
             } catch {
-                case _ : Throwable =>
-                    println(procedure + "Timeout")
-                    throw new Exception()
-                    null
+                case te: TimeoutException =>
+                    throw new TimeoutException(s"Peer $chordId calling $procedure timeout")
+                case e : Throwable =>
+                    throw e
             }
         } else {
             nodeSelection ! RemoteProcedureCall(procedure, args)
@@ -128,8 +129,8 @@ class Peer(id: Int) extends Actor {
 
             case JOIN =>
                 join(args(0).asInstanceOf[Int], args(1).asInstanceOf[ActorPath])
-                printFingerTable()
-//                Thread.sleep(2000)
+                Thread.sleep(1000)
+                println(s"$chordId complete")
                 sender ! JoinComplete
 
             case UPDATE_FINGER_TABLE => updateFingerTable(args(0).asInstanceOf[Node], args(1).asInstanceOf[Int])
@@ -146,7 +147,7 @@ class Peer(id: Int) extends Actor {
 //       printFingerTable()
        if (path != null) {
            initFingerTable(Node(id, path))
-           println(s"$chordId Init table complete")
+//           println(s"$chordId Init table complete")
            printFingerTable()
            updateOthers()
            // move key in (predecessor, n] from successor
@@ -160,24 +161,28 @@ class Peer(id: Int) extends Actor {
     }
 
     def initFingerTable(node: Node) = {
-        fingerTable(0).node = call(node, FIND_SUCCESSOR, List(fingerTable(0).interval.start), true)
-        successor = fingerTable(0).node
+        successor = call(node, FIND_SUCCESSOR, List(fingerTable(0).interval.start), true)
+        fingerTable(0).node = successor
         predecessor = call(successor, GET_PREDECESSOR, null, true)
         call(successor, SET_PREDECESSOR, List(selfNode), false)
-//        call(predecessor, SET_SUCCESSOR, List(selfNode), false)
+
         for (i <- 0 until m_exponent - 1) {
             // finger[i+1].start in [chordId, finger[i].node)
             if (Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(fingerTable(i + 1).interval.start)) {
                 fingerTable(i + 1).node = fingerTable(i).node
             } else {
-                fingerTable(i + 1).node = call(node, FIND_SUCCESSOR, List(fingerTable(i + 1).interval.start), true)
+                if (successor.id == predecessor.id &&   // only one existed node in the network
+                  fingerTable(i + 1).interval.start != node.id) {
+                    fingerTable(i + 1).node = selfNode
+                } else {
+                    fingerTable(i + 1).node = call(node, FIND_SUCCESSOR, List(fingerTable(i + 1).interval.start), true)
+                }
             }
         }
     }
 
     // tested
     def buildInterval() = {
-        val ringSize = math.pow(2, m_exponent).toInt
         var start = (chordId + 1) % ringSize
         for (i <- 1 to m_exponent) {
             val next =  (chordId + math.pow(2, i).toInt) % ringSize
@@ -196,21 +201,21 @@ class Peer(id: Int) extends Actor {
     }
 
     def updateOthers() = {
-        val ringSize = math.pow(2, m_exponent).toInt
         for (i <- 0 until m_exponent) {
             val k = chordId - math.pow(2, i).toInt
             val predSlotId = if (k >= 0) k else k + ringSize
             val pred = if (predSlotId == predecessor.id) predecessor else findPredecessor(predSlotId)
-            println(s"update others i = $i, k = $k, predSlotId = $predSlotId, predNode = ${pred.id}")
+//            val pred = findPredecessor(predSlotId)
+//            println(s"update others i = $i, k = $k, predSlotId = $predSlotId, predNode = ${pred.id}")
             call(pred, UPDATE_FINGER_TABLE, List(selfNode, i), false)
         }
     }
 
     def updateFingerTable(s: Node, i: Int) = {
-        println(s"node $chordId call update finger table")
+//        println(s"node $chordId call update finger table")
         if (s.id != chordId &&
             Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(s.id)) {
-            println(Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN) + " contains " + s.id)
+//            println(Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN) + " contains " + s.id)
             fingerTable(i).node = s
             if (i == 0) {
                 successor = s
@@ -259,7 +264,7 @@ class Peer(id: Int) extends Actor {
     def cloestPrecedingFinger(nodeId: Int): Node = {
         for (i <- m_exponent - 1 to 0 by -1) {
             val gtNode = fingerTable(i).node
-            // finger[i].node in [id, nodeId)
+            // finger[i].node in (id, nodeId)
             if (Interval(chordId, nodeId, OPEN, OPEN).contains(gtNode.id)) {
 
                 return gtNode
@@ -273,6 +278,7 @@ object Peer  {
     case class RemoteProcedureCall(procedure: Procedure.Value, args: List[Any])
     case class RemoteReply(node: Node)
     var m_exponent = 0
+    var ringSize = 0
 
     // enum for remote procedure call type
     object Procedure extends Enumeration {
@@ -365,6 +371,7 @@ object Peer  {
 
     def setMExponent(m: Int) = {
         m_exponent = m
+        ringSize = math.pow(2, m_exponent).toInt
     }
 
     def apply(id:Int, m: Int): Peer = {
