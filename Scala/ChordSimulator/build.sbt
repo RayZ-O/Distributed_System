@@ -6,7 +6,8 @@ version := "1.0"
 
 scalaVersion := "2.11.7"
 
-scalacOptions ++= Seq("-feature")
+scalacOptions ++= Seq("-feature", 
+					  "-deprecation")
 
 javacOptions ++= Seq("-Xmx4g")
 

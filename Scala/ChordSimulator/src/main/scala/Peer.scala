@@ -1,40 +1,43 @@
-import akka.actor.{ Actor, ActorRef, ActorPath, Props }
+import akka.actor.{ Actor, ActorRef, ActorPath, Props, ActorLogging, Cancellable }
 import akka.util.Timeout
-import akka.pattern.ask
+
 import scala.concurrent.duration._
-import scala.concurrent.Await
 import scala.util.Random
-import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.TimeoutException
+import scala.math.BigInt
+
+import com.roundeights.hasher.Implicits._
 import ChordUtil._
 import ChordUtil.EndPoint.CLOSED
 import ChordUtil.EndPoint.OPEN
-import Peer._
 
-case object Print;
-
-
-class Peer(chordid: Int) extends Actor {
+class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
+    import Peer._
+    // peer info
     val chordId = chordid
     val path = self.path.toString
-
-
-    // peer info
-    val selfNode = NodeInfo(chordId, self.path)
-    val fingerTable= new ArrayBuffer[FingerEntry]
+    import scala.collection.mutable.ArrayBuffer
+    val fingerTable= ArrayBuffer.empty[FingerEntry]
     var successor: NodeInfo  = _
     var predecessor: NodeInfo = _
+    val selfNode = NodeInfo(chordId, self.path)
+    var requestCount = 0
+    val numRequests = noRequests
+    val hopCounter = context.actorSelection("/user/hopcounter")
+    var tick: Cancellable = _
+
     // helper for initialization
     var guider: NodeInfo = _
     var initTableIndex = 0
     var updateTableIndex = 0
+
+
 
     override def receive = {
         case Join(node: NodeInfo) =>
             guider = node
             join()
 
-//        case _ =>
+        case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- start]")
     }
 
     def complete: Receive = {
@@ -53,11 +56,31 @@ class Peer(chordid: Int) extends Actor {
         case ChordRequst.ClosestPrecedingFinger(id) =>
             sender ! ChordReply.ClosestPrecedingFinger(cloestPrecedingFinger(id))
 
+        case Start =>
+            import context.dispatcher
+            tick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
+
+        case Tick =>
+            val randomStr = Random.nextString(10)
+            val id = (BigInt(randomStr.sha1.hex.substring(0, 16), 16) % BigInt(2).pow(m_exponent)).toInt
+            println(s"request id $id")
+            self ! ChordRequst.FindSuccessor(id)
+
+        case ChordReply.FindSuccessor(succ, num) =>
+            hopCounter ! Hops(num)
+            requestCount += 1
+            if (requestCount >= numRequests) {
+                tick.cancel()
+                hopCounter ! Finish
+            }
+
         case Print => printFingerTable()
+
+        case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- complete]")
     }
 
     def initNode: Receive = {
-        case ChordReply.FindSuccessor(node) =>
+        case ChordReply.FindSuccessor(node, num) =>
             successor = node
             fingerTable(0).node = node
             context.actorSelection(successor.path) ! ChordRequst.GetPredecessor
@@ -67,6 +90,8 @@ class Peer(chordid: Int) extends Actor {
             context.actorSelection(successor.path) ! ChordRequst.SetPredecessor(selfNode)
             context.become(initFingerTable)
             self ! InitTable(0)
+
+        case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- initNode]")
     }
 
     def initFingerTable: Receive = {
@@ -87,23 +112,24 @@ class Peer(chordid: Int) extends Actor {
                         self ! InitTable(i + 1)
                     } else {
                         initTableIndex = i + 1
-                        context.actorSelection(guider.path) ! ChordRequst.FindSuccessor(fingerTable(i + 1).interval.start)
+                        context.actorSelection(guider.path) !
+                        ChordRequst.FindSuccessor(fingerTable(i + 1).interval.start)
                     }
                 }
             }
 
-        case ChordReply.FindSuccessor(node) =>
+        case ChordReply.FindSuccessor(node, num) =>
             fingerTable(initTableIndex).node = node
             self ! InitTable(initTableIndex)
 
-//        case _ =>
+        case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- initFingerTable]")
     }
 
     def updateOthers: Receive = {
         case UpdateTable(i) =>
             if (i >= m_exponent) {
-                context.become(complete)
-                context.parent ! JoinComplete
+               context.become(complete)
+               context.parent ! JoinComplete
             } else {
                 val k = chordId - math.pow(2, i).toInt
                 val predSlotId = if (k >= 0) k else k + ringSize
@@ -125,7 +151,7 @@ class Peer(chordid: Int) extends Actor {
 
         case ChordRequst.UpdateFingerTable(node, i) => // nothing to do
 
-//        case _ =>
+        case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- updateOthers]")
 
     }
 
@@ -133,7 +159,7 @@ class Peer(chordid: Int) extends Actor {
     def find(rid: Int, rType: String, sender: ActorRef) = {
         if (Interval(chordId, successor.id, OPEN, CLOSED).contains(rid)) {
             rType match {
-                case "successor" => sender ! ChordReply.FindSuccessor(successor)
+                case "successor" => sender ! ChordReply.FindSuccessor(successor, 1)
                 case "predecessor" => sender ! ChordReply.FindPredecessor(selfNode)
             }
         } else {
@@ -197,7 +223,6 @@ class Peer(chordid: Int) extends Actor {
             val gtNode = fingerTable(i).node
             // finger[i].node in (id, nodeId)
             if (Interval(chordId, nodeId, OPEN, OPEN).contains(gtNode.id)) {
-
                 return gtNode
             }
         }
@@ -209,6 +234,7 @@ object Peer  {
     var m_exponent = 0
     var ringSize = 0
 
+    case object Tick
     case class StartFinder(node: NodeInfo)
     case class InitTable(index: Int)
     case class UpdateTable(index: Int)
@@ -238,9 +264,8 @@ object Peer  {
         ringSize = math.pow(2, m_exponent).toInt
     }
 
-    def apply(id:Int, m: Int): Peer = {
-        val peer = new Peer(id)
-        peer
+    def apply(id:Int, nr: Int): Peer = {
+        new Peer(id, nr)
     }
 }
 

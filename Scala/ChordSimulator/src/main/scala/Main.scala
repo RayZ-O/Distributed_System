@@ -9,11 +9,12 @@ object Main {
             println("usage: sbt \"run [num of peers][num of request]\"")
         }
         val numOfPeers = args(0).toInt
-        val numOfReqs = args(1).toInt     
-        val netBuilder = system.actorOf(Props[NetworkBuilder], "networkbuilder")
-        
-        
+        val numOfReqs = args(1).toInt
+
+        val netBuilder = system.actorOf(Props(classOf[NetworkBuilder], numOfPeers, numOfReqs), "networkbuilder")
+        val hopCounter = system.actorOf(Props(classOf[HopCounter], numOfPeers), "hopcounter")
+
         val inbox = Inbox.create(system)
-        inbox.send(netBuilder, Build(numOfPeers))
+        inbox.send(netBuilder, Build)
     }
 }
