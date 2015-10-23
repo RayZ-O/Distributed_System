@@ -1,155 +1,173 @@
-import akka.actor.{ Actor, ActorRef, ActorPath }
+import akka.actor.{ Actor, ActorRef, ActorPath, Props }
 import akka.util.Timeout
 import akka.pattern.ask
 import scala.concurrent.duration._
 import scala.concurrent.Await
-import scala.util.{ Random, Success, Failure }
+import scala.util.Random
 import scala.collection.mutable.ArrayBuffer
-import java.util.concurrent.TimeoutException
+import scala.concurrent.TimeoutException
+import ChordUtil._
+import ChordUtil.EndPoint.CLOSED
+import ChordUtil.EndPoint.OPEN
+import Peer._
 
 case object Print;
+
 
 class Peer(id: Int) extends Actor {
     val chordId = id
     val path = self.path.toString
 
-    // import helper classes and enums
-    import Peer._
-    import Peer.Procedure._
-    import Interval.EndPoint.CLOSED
-    import Interval.EndPoint.OPEN
 
-
-    val selfNode = Node(chordId, self.path)
+    // peer info
+    val selfNode = NodeInfo(chordId, self.path)
     val fingerTable= new ArrayBuffer[FingerEntry]
-    var successor: Node  = _
-    var predecessor: Node = _
+    var successor: NodeInfo  = _
+    var predecessor: NodeInfo = _
+    // helper for initialization
+    var guider: NodeInfo = _
+    var initTableIndex = 0
+    var updateTableIndex = 0
 
     override def receive = {
-        case RemoteProcedureCall(procedure, args) =>
-//            println(self.path.name + " receive from " + sender.path)
-            handleRemoteCall(procedure, args, sender)
+        case Join(node: NodeInfo) =>
+            println(s"$chordId receive join")
+            guider = node
+            join()
 
-        case Print =>
-            printFingerTable()
-
-        case _ =>
+//        case _ =>
     }
 
+    def complete: Receive = {
+        case ChordRequst.FindSuccessor(id) =>
+            println(s"$chordId receive find successor")
+            find(id, "successor", sender)
 
+        case ChordRequst.FindPredecessor(id) =>
+            println(s"$chordId receive find predecessor")
+            find(id, "predecessor", sender)
 
-    def call(node: Node, procedure: Procedure.Value, args: List[Any], ret: Boolean): Node = {
-        if (node.id == chordId) {
-            callLocal(procedure, args)
-        } else {
-            callRemote(node, procedure, args, ret)
-        }
+        case ChordRequst.GetSuccessor =>
+            sender ! ChordReply.GetSuccessor(successor)
+
+        case ChordRequst.GetPredecessor =>
+            sender ! ChordReply.GetPredecessor(predecessor)
+
+        case ChordRequst.SetPredecessor(node) =>
+            println(s"$chordId receive set predecessor")
+            predecessor = node
+
+        case ChordRequst.UpdateFingerTable(node, i) =>
+            println(s"$chordId receive update finger table")
+            updateFingerTable(node, i)
+
+        case ChordRequst.ClosestPrecedingFinger(id) =>
+            println(s"$chordId receive closest preceding finger")
+            sender ! ChordReply.ClosestPrecedingFinger(cloestPrecedingFinger(id))
+
+        case Print => printFingerTable()
     }
 
-    def callLocal(procedure: Procedure.Value, args: List[Any]): Node = {
-//        println(self.path.name + " call local " + procedure)
-        procedure match {
-            case GET_SUCCESSOR => successor
+    def initNode: Receive = {
+        case ChordReply.FindSuccessor(node) =>
+            println(s"$chordId receive find successor reply")
+            successor = node
+            fingerTable(0).node = node
+            context.actorSelection(successor.path) ! ChordRequst.GetPredecessor
 
-            case GET_PREDECESSOR => predecessor
-
-            case SET_SUCCESSOR =>
-                successor = args(0).asInstanceOf[Node]
-                null
-
-            case SET_PREDECESSOR =>
-                predecessor = args(0).asInstanceOf[Node]
-                null
-
-            case FIND_SUCCESSOR =>
-                findSuccessor(args(0).asInstanceOf[Int])
-
-            case FIND_PREDECESSOR =>
-                findPredecessor(args(0).asInstanceOf[Int])
-
-            case CLOSEST_PRECEDING_FINGER =>
-                cloestPrecedingFinger(args(0).asInstanceOf[Int])
-
-            case UPDATE_FINGER_TABLE =>
-                updateFingerTable(args(0).asInstanceOf[Node], args(1).asInstanceOf[Int])
-                null
-
-            case NOTIFY =>
-                notify(args(0).asInstanceOf[Node])
-                null
-
-            case _ => throw new NotImplementedError("Procedure call not implemented")
-        }
+        case ChordReply.GetPredecessor(pred) =>
+            println(s"$chordId receive get predecessor reply")
+            predecessor = pred
+            context.actorSelection(successor.path) ! ChordRequst.SetPredecessor(selfNode)
+            context.become(initFingerTable)
+            self ! InitTable(0)
     }
 
-    def callRemote(node: Node, procedure: Procedure.Value, args: List[Any], ret: Boolean): Node = {
-        val nodeSelection = context.actorSelection(node.path)
-//      println("Calling " + procedure + " on " + node.path)
-        if (ret) {
-            try {
-                implicit val timeout = Timeout(Duration(5000, "millis"))
-                import context.dispatcher // implicit ExecutionContext for future
-                val future = nodeSelection ? RemoteProcedureCall(procedure, args)
-                val reply = Await.result(future, Duration(500, "millis")).asInstanceOf[RemoteReply]
-                reply.node
-            } catch {
-                case te: TimeoutException =>
-                    throw new TimeoutException(s"Peer $chordId calling $procedure timeout")
-                case e : Throwable =>
-                    throw e
+    def initFingerTable: Receive = {
+        case InitTable(i) =>
+            if (i >= m_exponent - 1) {
+                context.become(updateOthers)
+                println(s"$chordId start update others")
+                self ! UpdateTable(0)
+            } else {
+                if (Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN)
+                        contains fingerTable(i + 1).interval.start) {
+                    fingerTable(i + 1).node = fingerTable(i).node
+                    self ! InitTable(i + 1)
+                } else {
+                    if (successor.id == predecessor.id &&   // only one existed node in the network
+                      fingerTable(i + 1).interval.start != guider.id) {
+                        fingerTable(i + 1).node = selfNode
+                        self ! InitTable(i + 1)
+                    } else {
+                        initTableIndex = i + 1
+                        context.actorSelection(guider.path) ! ChordRequst.FindSuccessor(fingerTable(i + 1).interval.start)
+                    }
+                }
             }
-        } else {
-            nodeSelection ! RemoteProcedureCall(procedure, args)
-            null
-        }
+
+        case ChordReply.FindSuccessor(node) =>
+            println(s"$chordId receive init table find successor")
+            fingerTable(initTableIndex).node = node
+            self ! InitTable(initTableIndex)
+
+//        case _ =>
+    }
+
+    def updateOthers: Receive = {
+        case UpdateTable(i) =>
+            println(s"$chordId receive update others $i")
+            printFingerTable()
+            if (i >= m_exponent) {
+                context.become(complete)
+                println(s"$chordId complete")
+                context.parent ! JoinComplete
+            } else {
+                val k = chordId - math.pow(2, i).toInt
+                val predSlotId = if (k >= 0) k else k + ringSize
+                println(s"pred slot = $predSlotId")
+                if (predSlotId == predecessor.id) {
+                    context.actorSelection(predecessor.path) ! ChordRequst.UpdateFingerTable(selfNode, i)
+                    self ! UpdateTable(i + 1)
+                } else {
+                    updateTableIndex = i
+//                    find(predSlotId, "predecessor", self)
+                    self ! ChordRequst.FindPredecessor(predSlotId)
+                }
+            }
+
+        case ChordReply.FindPredecessor(node) =>
+            println(s"$chordId receive update table find predecessor")
+            context.actorSelection(node.path) ! ChordRequst.UpdateFingerTable(selfNode, updateTableIndex)
+            self ! UpdateTable(updateTableIndex + 1)
+
+        case ChordRequst.FindPredecessor(id) =>
+            println(s"$chordId receive find predecessor")
+            find(id, "predecessor", sender)
+
+        case _ => println(s"[ERROR] $chordId Unhandle message in update others")
+
     }
 
 
-    def handleRemoteCall(procedure: Procedure.Value, args: List[Any], sender: ActorRef) = {
-        procedure match {
-            case GET_SUCCESSOR => sender ! RemoteReply(successor)
-
-            case GET_PREDECESSOR => sender ! RemoteReply(predecessor)
-
-            case SET_SUCCESSOR => successor = args(0).asInstanceOf[Node]
-
-            case SET_PREDECESSOR => predecessor = args(0).asInstanceOf[Node]
-
-            case FIND_SUCCESSOR =>
-                val succ = findSuccessor(args(0).asInstanceOf[Int])
-                sender ! RemoteReply(succ)
-
-            case FIND_PREDECESSOR =>
-                val pred = findPredecessor(args(0).asInstanceOf[Int])
-                sender ! RemoteReply(pred)
-
-            case CLOSEST_PRECEDING_FINGER =>
-                val node = cloestPrecedingFinger(args(0).asInstanceOf[Int])
-                sender ! RemoteReply(node)
-
-            case JOIN =>
-                join(args(0).asInstanceOf[Int], args(1).asInstanceOf[ActorPath])
-//                Thread.sleep(1000)
-//                println(s"$chordId complete")
-                sender ! JoinComplete
-
-            case UPDATE_FINGER_TABLE => updateFingerTable(args(0).asInstanceOf[Node], args(1).asInstanceOf[Int])
-
-            case NOTIFY => notify(args(0).asInstanceOf[Node])
-
-            case _ => throw new NotImplementedError("Remote procedure call not implemented")
+    def find(rid: Int, rType: String, sender: ActorRef) = {
+        if (Interval(chordId, successor.id, OPEN, CLOSED).contains(id)) {
+            rType match {
+                case "successor" => sender ! ChordReply.FindSuccessor(successor)
+                case "predecessor" => sender ! ChordReply.FindPredecessor(selfNode)
+            }
         }
+        val node = cloestPrecedingFinger(id)
+        val finder = context.actorOf(Props(classOf[Finder], id, sender, rType))
+        finder ! StartFinder(node)
     }
 
-    // n is current number of nodes inside the network
-    def join(id: Int, path: ActorPath) = {
+    def join() = {
        buildInterval()
-//       printFingerTable()
-       if (path != null) {
-           initFingerTable(Node(id, path))
-//           println(s"$chordId Init table complete")
-//           printFingerTable()
-           updateOthers()
+       println(s"$chordId build interval complete")
+       if (guider.path != null) {
+           context.become(initNode)
+           context.actorSelection(guider.path) ! ChordRequst.FindSuccessor(fingerTable(0).interval.start)
            // move key in (predecessor, n] from successor
        } else {
            for (i <- 0 until m_exponent) {
@@ -157,28 +175,9 @@ class Peer(id: Int) extends Actor {
            }
            successor = selfNode
            predecessor = selfNode
+           context.become(complete)
+           context.parent ! JoinComplete
        }
-    }
-
-    def initFingerTable(node: Node) = {
-        successor = call(node, FIND_SUCCESSOR, List(fingerTable(0).interval.start), true)
-        fingerTable(0).node = successor
-        predecessor = call(successor, GET_PREDECESSOR, null, true)
-        call(successor, SET_PREDECESSOR, List(selfNode), false)
-
-        for (i <- 0 until m_exponent - 1) {
-            // finger[i+1].start in [chordId, finger[i].node)
-            if (Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(fingerTable(i + 1).interval.start)) {
-                fingerTable(i + 1).node = fingerTable(i).node
-            } else {
-                if (successor.id == predecessor.id &&   // only one existed node in the network
-                  fingerTable(i + 1).interval.start != node.id) {
-                    fingerTable(i + 1).node = selfNode
-                } else {
-                    fingerTable(i + 1).node = call(node, FIND_SUCCESSOR, List(fingerTable(i + 1).interval.start), true)
-                }
-            }
-        }
     }
 
     // tested
@@ -200,19 +199,7 @@ class Peer(id: Int) extends Actor {
         }
     }
 
-    def updateOthers() = {
-        for (i <- 0 until m_exponent) {
-            val k = chordId - math.pow(2, i).toInt
-            val predSlotId = if (k >= 0) k else k + ringSize
-            val pred = if (predSlotId == predecessor.id) predecessor else findPredecessor(predSlotId)
-//            val pred = findPredecessor(predSlotId)
-//            println(s"update others i = $i, k = $k, predSlotId = $predSlotId, predNode = ${pred.id}")
-            call(pred, UPDATE_FINGER_TABLE, List(selfNode, i), false)
-        }
-    }
-
-    def updateFingerTable(s: Node, i: Int) = {
-//        println(s"node $chordId call update finger table")
+    def updateFingerTable(s: NodeInfo, i: Int) = {
         if (s.id != chordId &&
             Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(s.id)) {
 //            println(Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN) + " contains " + s.id)
@@ -220,48 +207,11 @@ class Peer(id: Int) extends Actor {
             if (i == 0) {
                 successor = s
             }
-            call(predecessor, UPDATE_FINGER_TABLE, List(s, i), false)
+            context.actorSelection(predecessor.path) ! ChordRequst.UpdateFingerTable(s, i)
         }
     }
 
-    // three following functions are for stabilization
-    def stabilize() {
-        val x = call(successor, GET_PREDECESSOR, null, true)
-        if (Interval(chordId, successor.id, OPEN, OPEN).contains(x.id)) {
-            successor = x
-        }
-        call(successor, NOTIFY, List(selfNode), false)
-    }
-
-    def notify(node: Node) = {
-        if (predecessor == null || Interval(predecessor.id, chordId, OPEN, OPEN).contains(node.id)) {
-            predecessor = node
-        }
-    }
-
-    def fixFinger() {
-        val i = Random.nextInt(fingerTable.length)
-        fingerTable(i).node = findSuccessor(fingerTable(i).interval.start)
-    }
-
-    def findSuccessor(nodeId: Int): Node = {
-        val node = findPredecessor(nodeId)
-        val succNode = call(node, GET_SUCCESSOR, null, true)
-        succNode
-    }
-
-    def findPredecessor(nodeId: Int): Node = {
-        var curNode = selfNode
-        var succNode = successor
-        while (!Interval(curNode.id, succNode.id, OPEN, CLOSED).contains(nodeId)) { // nodeId not in (n, n.succesor]
-//            println(chordId + " find " + nodeId + " in " + Interval(curNode.id, succNode.id, OPEN, CLOSED))
-           curNode = call(curNode, CLOSEST_PRECEDING_FINGER, List(nodeId), true)
-           succNode = call(curNode, GET_SUCCESSOR, null, true)
-        }
-        curNode
-    }
-
-    def cloestPrecedingFinger(nodeId: Int): Node = {
+    def cloestPrecedingFinger(nodeId: Int): NodeInfo = {
         for (i <- m_exponent - 1 to 0 by -1) {
             val gtNode = fingerTable(i).node
             // finger[i].node in (id, nodeId)
@@ -275,83 +225,16 @@ class Peer(id: Int) extends Actor {
 }
 
 object Peer  {
-    case class RemoteProcedureCall(procedure: Procedure.Value, args: List[Any])
-    case class RemoteReply(node: Node)
     var m_exponent = 0
     var ringSize = 0
 
-    // enum for remote procedure call type
-    object Procedure extends Enumeration {
-        type Procedure = Value
-        val GET_SUCCESSOR,
-            GET_PREDECESSOR,
-            SET_SUCCESSOR,
-            SET_PREDECESSOR,
-            FIND_SUCCESSOR,
-            FIND_PREDECESSOR,
-            CLOSEST_PRECEDING_FINGER,
-            JOIN,
-            UPDATE_FINGER_TABLE,
-            NOTIFY = Value
-    }
-
-    class Node(nodeId: Int, nodePath: ActorPath) {
-        val id = nodeId
-        val path= nodePath
-        override def toString() = {
-            "ID=" + id //+ " Path=" + path
-        }
-    }
-
-    object Node {
-        def apply(nodeId: Int, nodePath: ActorPath): Node = {
-            val node = new Node(nodeId, nodePath)
-            node
-        }
-    }
-
-    import Interval.EndPoint
-    import Interval.EndPoint.CLOSED
-    import Interval.EndPoint.OPEN
-
-    class Interval(istart: Int, iend: Int, left: EndPoint.Value, right: EndPoint.Value) {
-        val start = istart
-        val end = iend
-        val leftEnd = left
-        val rightEnd = right
-
-        override def toString() = {
-            val prefix = if (left == OPEN) "(" else "["
-            val suffix = if (right == OPEN) ")" else "]"
-
-            prefix + s"$start, $end" + suffix
-        }
-
-        def contains(n: Int): Boolean = {
-            if (start < end) {
-                (if (left == OPEN) n > start else n >= start) && (if (right == OPEN) n < end else n <= end)
-            } else {
-                (if (left == OPEN) n > start else n >= start) || (if (right == OPEN) n < end else n <= end)
-            }
-
-        }
-    }
-
-    object Interval {
-        def apply(start: Int, end: Int, left: EndPoint.Value, right: EndPoint.Value): Interval = {
-            val interval = new Interval(start, end, left, right)
-            interval
-        }
-
-        object EndPoint extends Enumeration {
-             type EndPoint = Value
-             val OPEN, CLOSED = Value
-        }
-    }
+    case class StartFinder(node: NodeInfo)
+    case class InitTable(index: Int)
+    case class UpdateTable(index: Int)
 
     class FingerEntry(start: Int, end: Int) {
         var interval = Interval(start, end, CLOSED, OPEN)
-        var node: Node= _ // first node >= start
+        var node: NodeInfo= _ // first node >= start
         override def toString() = {
             "Interval: " + interval + "\nNode: " + node
         }
@@ -362,7 +245,7 @@ object Peer  {
             val entry = new FingerEntry(start, next)
             entry
         }
-        def apply(start: Int, next: Int, node: Node): FingerEntry = {
+        def apply(start: Int, next: Int, node: NodeInfo): FingerEntry = {
             val entry = new FingerEntry(start, next)
             entry.node = node
             entry
