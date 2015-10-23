@@ -14,6 +14,7 @@ class HopCounter(noNodes: Int) extends Actor {
         case Hops(num) =>
             hopSum += num
             hopCount += 1
+
         case Finish =>
             finishedCount += 1
             if (finishedCount == numNodes) {

@@ -1,17 +1,11 @@
 import akka.actor.{ Actor, Props, ActorPath, ActorSelection }
-import akka.util.Timeout
-import akka.pattern.ask
-
 import scala.math.BigInt
 import scala.util.Random
-import scala.concurrent.duration._
-import scala.concurrent.Await
-
 import com.roundeights.hasher.Implicits._
 import ChordUtil._
 
 case object Build
-case class Join(node: NodeInfo)
+case class Join(guider: NodeInfo)
 case object JoinComplete
 case object Start
 case object Print
@@ -19,7 +13,8 @@ case object Print
 class NetworkBuilder(noNodes: Int, noRequests: Int) extends Actor {
     val numNodes = noNodes
     val numRequest = noRequests
-    val m = 16
+
+    val m = 19
     import scala.collection.mutable.ArrayBuffer
     var nodes= ArrayBuffer.empty[Tuple2[Int, String]]
     var joinedCount = 0
@@ -39,15 +34,19 @@ class NetworkBuilder(noNodes: Int, noRequests: Int) extends Actor {
 
         case JoinComplete =>
             if (joinedCount < numNodes) {
+                // report build progress
+                if (joinedCount % 1000 == 0) {
+                    println(s"$joinedCount peers joined")
+                }
                 val random = Random.nextInt(joinedCount)
                 val peer = context.actorSelection(nodes(joinedCount)._2)
                 val path = ActorPath.fromString(self.path.toString + "/" + nodes(random)._2)
                 peer ! Join(NodeInfo(nodes(random)._1, path))
                 joinedCount += 1
             } else {
+                println(s"Build $numNodes peers complete")
                 // all nodes start to send request
                 context.children foreach { _ ! Start }
-//                context.children foreach { _ ! Print }
             }
 
         case _ =>
