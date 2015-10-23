@@ -15,7 +15,7 @@ case class Join(node: NodeInfo)
 case object JoinComplete
 
 class NetworkBuilder extends Actor {
-    val m = 3
+    val m = 16
     import scala.collection.mutable.ArrayBuffer
     var nodes= ArrayBuffer[Tuple2[Int, String]]()
     var numNodes = 0
@@ -25,7 +25,7 @@ class NetworkBuilder extends Actor {
         case Build(num) =>
             numNodes = num
             Peer.setMExponent(m)
-            val randomIds = Random.shuffle((1 to (math.pow(2, m).toInt)).toVector)
+            val randomIds = Random.shuffle((0 until (math.pow(2, m).toInt)).toVector)
             for (i <- 0 until numNodes) {
                 val id = randomIds(i)
                 context.actorOf(Props(classOf[Peer], id), s"peer$id")
@@ -40,16 +40,13 @@ class NetworkBuilder extends Actor {
                 val random = Random.nextInt(joinedCount)
                 val peer = context.actorSelection(nodes(joinedCount)._2)
                 val path = ActorPath.fromString(self.path.toString + "/" + nodes(random)._2)
+                println(s"join ${nodes(joinedCount)._1}, guider is ${nodes(random)._1}")
                 peer ! Join(NodeInfo(nodes(random)._1, path))
                 joinedCount += 1
             } else {
                 // TODO send request
-                for (n <- nodes) {
-                    context.actorSelection(n._2) ! Print
-//                    Thread.sleep(1000)
-                }
+//                context.actorSelection("user/networkbuilder/*") ! Print
                 context.system.shutdown();
-
             }
 
         case _ =>

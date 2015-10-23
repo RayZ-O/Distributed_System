@@ -14,8 +14,8 @@ import Peer._
 case object Print;
 
 
-class Peer(id: Int) extends Actor {
-    val chordId = id
+class Peer(chordid: Int) extends Actor {
+    val chordId = chordid
     val path = self.path.toString
 
 
@@ -31,7 +31,6 @@ class Peer(id: Int) extends Actor {
 
     override def receive = {
         case Join(node: NodeInfo) =>
-            println(s"$chordId receive join")
             guider = node
             join()
 
@@ -39,30 +38,19 @@ class Peer(id: Int) extends Actor {
     }
 
     def complete: Receive = {
-        case ChordRequst.FindSuccessor(id) =>
-            println(s"$chordId receive find successor")
-            find(id, "successor", sender)
+        case ChordRequst.FindSuccessor(id) => find(id, "successor", sender)
 
-        case ChordRequst.FindPredecessor(id) =>
-            println(s"$chordId receive find predecessor")
-            find(id, "predecessor", sender)
+        case ChordRequst.FindPredecessor(id) => find(id, "predecessor", sender)
 
-        case ChordRequst.GetSuccessor =>
-            sender ! ChordReply.GetSuccessor(successor)
+        case ChordRequst.GetSuccessor => sender ! ChordReply.GetSuccessor(successor)
 
-        case ChordRequst.GetPredecessor =>
-            sender ! ChordReply.GetPredecessor(predecessor)
+        case ChordRequst.GetPredecessor => sender ! ChordReply.GetPredecessor(predecessor)
 
-        case ChordRequst.SetPredecessor(node) =>
-            println(s"$chordId receive set predecessor")
-            predecessor = node
+        case ChordRequst.SetPredecessor(node) => predecessor = node
 
-        case ChordRequst.UpdateFingerTable(node, i) =>
-            println(s"$chordId receive update finger table")
-            updateFingerTable(node, i)
+        case ChordRequst.UpdateFingerTable(node, i) => updateFingerTable(node, i)
 
         case ChordRequst.ClosestPrecedingFinger(id) =>
-            println(s"$chordId receive closest preceding finger")
             sender ! ChordReply.ClosestPrecedingFinger(cloestPrecedingFinger(id))
 
         case Print => printFingerTable()
@@ -70,13 +58,11 @@ class Peer(id: Int) extends Actor {
 
     def initNode: Receive = {
         case ChordReply.FindSuccessor(node) =>
-            println(s"$chordId receive find successor reply")
             successor = node
             fingerTable(0).node = node
             context.actorSelection(successor.path) ! ChordRequst.GetPredecessor
 
         case ChordReply.GetPredecessor(pred) =>
-            println(s"$chordId receive get predecessor reply")
             predecessor = pred
             context.actorSelection(successor.path) ! ChordRequst.SetPredecessor(selfNode)
             context.become(initFingerTable)
@@ -87,9 +73,9 @@ class Peer(id: Int) extends Actor {
         case InitTable(i) =>
             if (i >= m_exponent - 1) {
                 context.become(updateOthers)
-                println(s"$chordId start update others")
                 self ! UpdateTable(0)
             } else {
+                // finger[i+1].start in [chordId, finger[i].node)
                 if (Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN)
                         contains fingerTable(i + 1).interval.start) {
                     fingerTable(i + 1).node = fingerTable(i).node
@@ -107,7 +93,6 @@ class Peer(id: Int) extends Actor {
             }
 
         case ChordReply.FindSuccessor(node) =>
-            println(s"$chordId receive init table find successor")
             fingerTable(initTableIndex).node = node
             self ! InitTable(initTableIndex)
 
@@ -116,55 +101,50 @@ class Peer(id: Int) extends Actor {
 
     def updateOthers: Receive = {
         case UpdateTable(i) =>
-            println(s"$chordId receive update others $i")
-            printFingerTable()
             if (i >= m_exponent) {
                 context.become(complete)
-                println(s"$chordId complete")
                 context.parent ! JoinComplete
             } else {
                 val k = chordId - math.pow(2, i).toInt
                 val predSlotId = if (k >= 0) k else k + ringSize
-                println(s"pred slot = $predSlotId")
                 if (predSlotId == predecessor.id) {
                     context.actorSelection(predecessor.path) ! ChordRequst.UpdateFingerTable(selfNode, i)
                     self ! UpdateTable(i + 1)
                 } else {
                     updateTableIndex = i
-//                    find(predSlotId, "predecessor", self)
-                    self ! ChordRequst.FindPredecessor(predSlotId)
+                    find(predSlotId, "predecessor", self)
                 }
             }
 
         case ChordReply.FindPredecessor(node) =>
-            println(s"$chordId receive update table find predecessor")
             context.actorSelection(node.path) ! ChordRequst.UpdateFingerTable(selfNode, updateTableIndex)
             self ! UpdateTable(updateTableIndex + 1)
 
-        case ChordRequst.FindPredecessor(id) =>
-            println(s"$chordId receive find predecessor")
-            find(id, "predecessor", sender)
+        case ChordRequst.ClosestPrecedingFinger(id) =>
+            sender ! ChordReply.ClosestPrecedingFinger(cloestPrecedingFinger(id))
 
-        case _ => println(s"[ERROR] $chordId Unhandle message in update others")
+        case ChordRequst.UpdateFingerTable(node, i) => // nothing to do
+
+//        case _ =>
 
     }
 
 
     def find(rid: Int, rType: String, sender: ActorRef) = {
-        if (Interval(chordId, successor.id, OPEN, CLOSED).contains(id)) {
+        if (Interval(chordId, successor.id, OPEN, CLOSED).contains(rid)) {
             rType match {
                 case "successor" => sender ! ChordReply.FindSuccessor(successor)
                 case "predecessor" => sender ! ChordReply.FindPredecessor(selfNode)
             }
+        } else {
+            val node = cloestPrecedingFinger(rid)
+            val finder = context.actorOf(Props(classOf[Finder], rid, sender, rType))
+            finder ! StartFinder(node)
         }
-        val node = cloestPrecedingFinger(id)
-        val finder = context.actorOf(Props(classOf[Finder], id, sender, rType))
-        finder ! StartFinder(node)
     }
 
     def join() = {
        buildInterval()
-       println(s"$chordId build interval complete")
        if (guider.path != null) {
            context.become(initNode)
            context.actorSelection(guider.path) ! ChordRequst.FindSuccessor(fingerTable(0).interval.start)
@@ -200,9 +180,10 @@ class Peer(id: Int) extends Actor {
     }
 
     def updateFingerTable(s: NodeInfo, i: Int) = {
-        if (s.id != chordId &&
-            Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(s.id)) {
-//            println(Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN) + " contains " + s.id)
+        // s in [chordId, finger[i].node)
+        if (Interval(chordId, fingerTable(i).node.id, CLOSED, OPEN).contains(s.id) &&
+         !Interval(chordId, fingerTable(i).interval.start, OPEN, OPEN).contains(s.id) &&
+         s.id != chordId) {
             fingerTable(i).node = s
             if (i == 0) {
                 successor = s

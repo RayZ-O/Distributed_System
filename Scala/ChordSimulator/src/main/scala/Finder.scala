@@ -11,18 +11,14 @@ class Finder(rId: Int, rSender: ActorRef, rType: String) extends Actor {
 
     override def receive = {
         case StartFinder(node) =>
-            println("finder start")
             context.actorSelection(node.path) ! ChordRequst.ClosestPrecedingFinger(requestId)
 
         case ChordReply.ClosestPrecedingFinger(node) =>
-            println("finder receive closest preceding finger")
             curNode = node
-            context.actorSelection(node.path) ! ChordRequst.GetSuccessor
+            context.actorSelection(curNode.path) ! ChordRequst.GetSuccessor
 
         case ChordReply.GetSuccessor(succ) =>
-            println("finder receive get successor")
             if (Interval(curNode.id, succ.id, OPEN, CLOSED).contains(requestId)) {
-                println("finder found right node")
                 rType match {
                     case "successor" => requestSender ! ChordReply.FindSuccessor(succ)
                     case "predecessor" => requestSender ! ChordReply.FindPredecessor(curNode)
