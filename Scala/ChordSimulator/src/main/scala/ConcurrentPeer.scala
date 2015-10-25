@@ -3,6 +3,7 @@ import akka.actor.{ Actor, ActorRef, Props, ActorLogging, Cancellable }
 import scala.concurrent.duration._
 import scala.util.Random
 
+import com.roundeights.hasher.Implicits._
 import ChordUtil._
 import ChordUtil.EndPoint.{ CLOSED, OPEN }
 
@@ -17,26 +18,28 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
     var successor: NodeInfo  = _
     var predecessor: NodeInfo = _
     val selfNode = NodeInfo(chordId, self.path)
+
     var requestCount = 0
     val numRequests = noRequests
     val hopCounter = context.actorSelection("/user/hopcounter")
-    var tick: Cancellable = _
+    var requestTick: Cancellable = _
+    var stabilizedTick: Cancellable = _
 
     // helper for initialization
     var guider: NodeInfo = _
 
     override def receive =  {
         case ChordRequst.Join(node) =>
-            println(s"$chordId receive join")
             guider = node
             predecessor = null
             join()
 
-        case ChordReply.FindPredecessor(node) =>
+        case ChordReply.FindSuccessor(node, num) =>
             successor = node
+            fingerTable(0).node = node
             context.become(complete)
             context.parent ! ChordReply.JoinComplete
-            tick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
+            stabilizedTick = context.system.scheduler.schedule(100.millisecond, 500.millisecond, self, StabilizedTick)
 
         case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- start]")
     }
@@ -51,8 +54,13 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
         case ChordRequst.ClosestPrecedingFinger(id) =>
             sender ! ChordReply.ClosestPrecedingFinger(cloestPrecedingFinger(id))
 
-        case Tick =>
-            println(s"$chordId receive tick")
+        case ChordRequst.Notify(node) =>
+            if (predecessor == null ||
+              Interval(predecessor.id, chordId, OPEN, OPEN).contains(node.id)) {
+                predecessor = node
+            }
+
+        case StabilizedTick =>
             context.actorSelection(successor.path) ! ChordRequst.GetPredecessor
             val i = Random.nextInt(m_exponent - 1) + 1
             find(fingerTable(i).interval.start, self, i)
@@ -61,16 +69,30 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
             if (node != null &&
               Interval(chordId, successor.id, OPEN, OPEN).contains(node.id)) {
                 successor = node
+                fingerTable(0).node = node
             }
             context.actorSelection(successor.path) ! ChordRequst.Notify(selfNode)
 
-        case ChordRequst.Notify(node) =>
-            if (predecessor == null ||
-              Interval(predecessor.id, chordId, OPEN, OPEN).contains(node.id)) {
-                predecessor = node
-            }
+
 
         case ChordReply.FixFinger(node, idx) => fingerTable(idx).node = node
+
+        case ChordRequst.Start =>
+            import context.dispatcher
+            requestTick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
+
+        case Tick =>
+            val randomStr = Random.nextString(10)
+            val id = (BigInt(randomStr.sha1.hex, 16) % ringSize).toInt
+            self ! ChordRequst.FindSuccessor(id)
+
+        case ChordReply.FindSuccessor(succ, num) =>
+            hopCounter ! Hops(num)
+            requestCount += 1
+            if (requestCount >= numRequests) {
+                requestTick.cancel()
+                hopCounter ! Finish
+            }
 
         case ChordRequst.Print => printFingerTable()
 
@@ -80,14 +102,13 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
     def join() = {
         buildInterval()
         if (guider.path != null) {
-             println(s"$chordId request find succ on ${guider.id}")
             context.actorSelection(guider.path) ! ChordRequst.FindSuccessor(fingerTable(0).interval.start)
         } else {
             successor = selfNode
+            fingerTable(0).node = selfNode
             context.become(complete)
-            println(s"$chordId complete join")
             context.parent ! ChordReply.JoinComplete
-            tick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
+            stabilizedTick = context.system.scheduler.schedule(100.millisecond, 500.millisecond, self, StabilizedTick)
         }
     }
 
@@ -129,9 +150,10 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
 
     def cloestPrecedingFinger(nodeId: Int): NodeInfo = {
         for (i <- m_exponent - 1 to 0 by -1) {
-        val gtNode = fingerTable(i).node
+            val gtNode = fingerTable(i).node
             // finger[i].node in (id, nodeId)
-            if (Interval(chordId, nodeId, OPEN, OPEN).contains(gtNode.id)) {
+            if (gtNode != null &&
+              Interval(chordId, nodeId, OPEN, OPEN).contains(gtNode.id)) {
                 return gtNode
             }
         }
@@ -142,6 +164,8 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
 object ConcurrentPeer  {
     var m_exponent = 0
     var ringSize = 0
+
+    case object StabilizedTick;
 
     def setMExponent(m: Int) = {
         m_exponent = m

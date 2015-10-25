@@ -18,7 +18,8 @@ class HopCounter(noNodes: Int) extends Actor {
         case Finish =>
             finishedCount += 1
             if (finishedCount == numNodes) {
-                println(s"The average number of hops = ${hopSum / hopCount}")
+                println(s"($numNodes peers: the average number of hops = ${hopSum / hopCount}")
+                Thread.sleep(1000)
                 context.system.terminate()
             }
 

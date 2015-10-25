@@ -11,7 +11,7 @@ class NetworkBuilder(noNodes: Int, noRequests: Int) extends Actor {
     val numNodes = noNodes
     val numRequest = noRequests
 
-    val m = 3
+    val m = 19
     import scala.collection.mutable.ArrayBuffer
     var nodes= ArrayBuffer.empty[Tuple2[Int, String]]
     var joinedCount = 0
@@ -41,10 +41,8 @@ class NetworkBuilder(noNodes: Int, noRequests: Int) extends Actor {
             joinedCount += 1
 
         case ChordReply.JoinComplete =>
-            println(s"$joinedCount peers joined")
             if (joinedCount < numNodes) {
                 // report build progress
-                Thread.sleep(1000)
                 if (joinedCount % 1000 == 0) {
                     println(s"$joinedCount peers joined")
                 }
@@ -56,10 +54,7 @@ class NetworkBuilder(noNodes: Int, noRequests: Int) extends Actor {
             } else {
                 println(s"Build $numNodes peers complete")
                 // all nodes start to send request
-//                context.children foreach { _ ! Start }
-                import context.dispatcher
-                import scala.concurrent.duration._
-                val tick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
+                context.children foreach { _ ! ChordRequst.Start }
             }
 
         case Tick => context.children foreach { _ ! ChordRequst.Print }

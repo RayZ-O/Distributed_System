@@ -61,7 +61,7 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
 
         case Tick =>
             val randomStr = Random.nextString(10)
-            val id = (BigInt(randomStr.sha1.hex.substring(0, 16), 16) % ringSize).toInt
+            val id = (BigInt(randomStr.sha1.hex, 16) % ringSize).toInt
             self ! ChordRequst.FindSuccessor(id)
 
         case ChordReply.FindSuccessor(succ, num) =>
