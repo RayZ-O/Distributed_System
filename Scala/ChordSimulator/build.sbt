@@ -9,8 +9,6 @@ scalaVersion := "2.11.7"
 scalacOptions ++= Seq("-feature", 
 					  "-deprecation")
 
-javacOptions ++= Seq("-Xmx4g")
-
 resolvers ++= Seq("RoundEights" at "http://maven.spikemark.net/roundeights")
 
 libraryDependencies ++= Seq(
