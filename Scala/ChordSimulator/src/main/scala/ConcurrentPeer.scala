@@ -14,7 +14,7 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
     val chordId = chordid
     val path = self.path.toString
     import scala.collection.mutable.ArrayBuffer
-    val fingerTable= ArrayBuffer.empty[FingerEntry]
+    val fingerTable = ArrayBuffer.empty[FingerEntry]
     var successor: NodeInfo  = _
     var predecessor: NodeInfo = _
     val selfNode = NodeInfo(chordId, self.path)
@@ -27,6 +27,8 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
 
     // helper for initialization
     var guider: NodeInfo = _
+    var randomIdxs: Vector[Int] = _
+    var curIdx = 0
 
     override def receive =  {
         case ChordRequst.Join(node) =>
@@ -39,7 +41,8 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
             fingerTable(0).node = node
             context.become(complete)
             context.parent ! ChordReply.JoinComplete
-            stabilizedTick = context.system.scheduler.schedule(100.millisecond, 500.millisecond, self, StabilizedTick)
+            randomIdxs = Random.shuffle((1 until m_exponent).toVector)
+            stabilizedTick = context.system.scheduler.schedule(100.millisecond, 300.millisecond, self, StabilizedTick)
 
         case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- start]")
     }
@@ -62,7 +65,12 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
 
         case StabilizedTick =>
             context.actorSelection(successor.path) ! ChordRequst.GetPredecessor
-            val i = Random.nextInt(m_exponent - 1) + 1
+            if (curIdx == randomIdxs.length) {
+                randomIdxs = Random.shuffle((1 until m_exponent).toVector)
+                curIdx = 0
+            }
+            val i = randomIdxs(curIdx)
+            curIdx += 1
             find(fingerTable(i).interval.start, self, i)
 
         case ChordReply.GetPredecessor(node) =>
@@ -78,7 +86,6 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
         case ChordReply.FixFinger(node, idx) => fingerTable(idx).node = node
 
         case ChordRequst.Start =>
-            import context.dispatcher
             requestTick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
 
         case Tick =>
@@ -108,7 +115,8 @@ class ConcurrentPeer(chordid: Int, noRequests: Int) extends Actor with ActorLogg
             fingerTable(0).node = selfNode
             context.become(complete)
             context.parent ! ChordReply.JoinComplete
-            stabilizedTick = context.system.scheduler.schedule(100.millisecond, 500.millisecond, self, StabilizedTick)
+            randomIdxs = Random.shuffle((1 until m_exponent).toVector)
+            stabilizedTick = context.system.scheduler.schedule(100.millisecond, 300.millisecond, self, StabilizedTick)
         }
     }
 

@@ -1,8 +1,6 @@
 import akka.actor.{ Actor, Props, ActorPath, ActorSelection }
-import scala.math.BigInt
 import scala.util.Random
 
-import com.roundeights.hasher.Implicits._
 import ChordUtil._
 
 case class Build(mode: String)
@@ -52,12 +50,12 @@ class NetworkBuilder(noNodes: Int, noRequests: Int) extends Actor {
                 peer ! ChordRequst.Join(NodeInfo(nodes(random)._1, path))
                 joinedCount += 1
             } else {
+                println("Wating for finger table update...")
+                Thread.sleep(5 * numNodes / 10000)
                 println(s"Build $numNodes peers complete")
                 // all nodes start to send request
                 context.children foreach { _ ! ChordRequst.Start }
             }
-
-        case Tick => context.children foreach { _ ! ChordRequst.Print }
 
         case _ =>
     }
