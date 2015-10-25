@@ -15,6 +15,7 @@ object Main {
         val hopCounter = system.actorOf(Props(classOf[HopCounter], numOfPeers), "hopcounter")
 
         val inbox = Inbox.create(system)
-        inbox.send(netBuilder, Build)
+//        inbox.send(netBuilder, Build("normal"))
+        inbox.send(netBuilder, Build("concurrent"))
     }
 }

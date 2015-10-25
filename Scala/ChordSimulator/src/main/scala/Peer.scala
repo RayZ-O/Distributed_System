@@ -7,8 +7,7 @@ import scala.math.BigInt
 
 import com.roundeights.hasher.Implicits._
 import ChordUtil._
-import ChordUtil.EndPoint.CLOSED
-import ChordUtil.EndPoint.OPEN
+import ChordUtil.EndPoint.{ CLOSED, OPEN }
 
 class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
     import Peer._
@@ -33,7 +32,7 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
 
 
     override def receive = {
-        case Join(node: NodeInfo) =>
+        case ChordRequst.Join(node: NodeInfo) =>
             guider = node
             join()
 
@@ -56,14 +55,13 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
         case ChordRequst.ClosestPrecedingFinger(id) =>
             sender ! ChordReply.ClosestPrecedingFinger(cloestPrecedingFinger(id))
 
-        case Start =>
+        case ChordRequst.Start =>
             import context.dispatcher
             tick = context.system.scheduler.schedule(1.second, 1.second, self, Tick)
 
         case Tick =>
             val randomStr = Random.nextString(10)
             val id = (BigInt(randomStr.sha1.hex.substring(0, 16), 16) % ringSize).toInt
-            println(s"request id $id")
             self ! ChordRequst.FindSuccessor(id)
 
         case ChordReply.FindSuccessor(succ, num) =>
@@ -74,7 +72,7 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
                 hopCounter ! Finish
             }
 
-        case Print => printFingerTable()
+        case ChordRequst.Print => printFingerTable()
 
         case msg => log.warning(s"Unhandle message $msg in peer$chordId [state <- complete]")
     }
@@ -129,7 +127,7 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
         case UpdateTable(i) =>
             if (i >= m_exponent) {
                context.become(complete)
-               context.parent ! JoinComplete
+               context.parent ! ChordReply.JoinComplete
             } else {
                 val k = chordId - math.pow(2, i).toInt
                 val predSlotId = if (k >= 0) k else k + ringSize
@@ -165,7 +163,7 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
         } else {
             val node = cloestPrecedingFinger(rid)
             val finder = context.actorOf(Props(classOf[Finder], rid, sender, rType))
-            finder ! StartFinder(node)
+            finder ! ChordRequst.StartFinder(node)
         }
     }
 
@@ -182,11 +180,10 @@ class Peer(chordid: Int, noRequests: Int) extends Actor with ActorLogging {
            successor = selfNode
            predecessor = selfNode
            context.become(complete)
-           context.parent ! JoinComplete
+           context.parent ! ChordReply.JoinComplete
        }
     }
 
-    // tested
     def buildInterval() = {
         var start = (chordId + 1) % ringSize
         for (i <- 1 to m_exponent) {
@@ -234,30 +231,8 @@ object Peer  {
     var m_exponent = 0
     var ringSize = 0
 
-    case object Tick
-    case class StartFinder(node: NodeInfo)
     case class InitTable(index: Int)
     case class UpdateTable(index: Int)
-
-    class FingerEntry(start: Int, end: Int) {
-        var interval = Interval(start, end, CLOSED, OPEN)
-        var node: NodeInfo= _ // first node >= start
-        override def toString() = {
-            "Interval: " + interval + "\nNode: " + node
-        }
-    }
-
-    object FingerEntry {
-        def apply(start: Int, next: Int): FingerEntry = {
-            val entry = new FingerEntry(start, next)
-            entry
-        }
-        def apply(start: Int, next: Int, node: NodeInfo): FingerEntry = {
-            val entry = new FingerEntry(start, next)
-            entry.node = node
-            entry
-        }
-    }
 
     def setMExponent(m: Int) = {
         m_exponent = m

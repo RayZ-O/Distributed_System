@@ -1,17 +1,21 @@
 import akka.actor.{ Actor, ActorRef, ActorLogging }
+
 import ChordUtil._
-import Peer.StartFinder
-import EndPoint.CLOSED
-import EndPoint.OPEN
+import EndPoint.{ CLOSED, OPEN }
 
 class Finder(rId: Int, rSender: ActorRef, rType: String) extends Actor with ActorLogging {
     val requestId = rId
     val requestSender = rSender
     var curNode: NodeInfo = _
     var numHops = 1
+    var index = -1
 
     override def receive = {
-        case StartFinder(node) =>
+        case ChordRequst.StartFinder(node) =>
+            context.actorSelection(node.path) ! ChordRequst.ClosestPrecedingFinger(requestId)
+
+        case ChordRequst.FixFinger(node, idx) =>
+            index = idx
             context.actorSelection(node.path) ! ChordRequst.ClosestPrecedingFinger(requestId)
 
         case ChordReply.ClosestPrecedingFinger(node) =>
@@ -21,10 +25,14 @@ class Finder(rId: Int, rSender: ActorRef, rType: String) extends Actor with Acto
         case ChordReply.GetSuccessor(succ) =>
             numHops += 1
             if (Interval(curNode.id, succ.id, OPEN, CLOSED).contains(requestId)) {
-                rType match {
-                    case "successor" => requestSender ! ChordReply.FindSuccessor(succ, numHops)
-                    case "predecessor" => requestSender ! ChordReply.FindPredecessor(curNode)
-                    case t => log.warning(s"Unregconized request type $t in finder")
+                if (index < 0) {
+                    rType match {
+                        case "successor" => requestSender ! ChordReply.FindSuccessor(succ, numHops)
+                        case "predecessor" => requestSender ! ChordReply.FindPredecessor(curNode)
+                        case t => log.warning(s"Unregconized request type $t in finder")
+                    }
+                } else {
+                    requestSender ! ChordReply.FixFinger(succ, index)
                 }
                 context.stop(self)
             } else {

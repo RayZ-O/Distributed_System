@@ -1,6 +1,10 @@
 import akka.actor.ActorPath
 
 object ChordUtil {
+
+    case object Tick
+
+    // request messages
     object ChordRequst {
         // if sendHopCount = true, the number of hops that have to be traversed
         // to deliever a message will be sent to HopCounter
@@ -11,16 +15,45 @@ object ChordUtil {
         case object GetPredecessor
         case class SetPredecessor(node: NodeInfo)
         case class UpdateFingerTable(node: NodeInfo, index: Int)
+        case class Notify(node: NodeInfo)
+        case class StartFinder(node: NodeInfo)
+        case class FixFinger(node: NodeInfo, index: Int)
+        case class Join(guider: NodeInfo)
+        case object Start
+        case object Print
     }
 
+    // reply messages
     object ChordReply {
         case class FindSuccessor(node: NodeInfo, numHops: Int)
         case class FindPredecessor(node: NodeInfo)
         case class ClosestPrecedingFinger(node: NodeInfo)
         case class GetSuccessor(node: NodeInfo)
         case class GetPredecessor(node: NodeInfo)
+        case class FixFinger(node: NodeInfo, index: Int)
+        case object JoinComplete
     }
 
+    class FingerEntry(start: Int, end: Int) {
+        import EndPoint.{ CLOSED, OPEN }
+        var interval = Interval(start, end, CLOSED, OPEN)
+        var node: NodeInfo= _ // first node >= start
+        override def toString() = {
+            "Interval: " + interval + "\nNode: " + node
+        }
+    }
+
+    object FingerEntry {
+        def apply(start: Int, next: Int): FingerEntry = {
+            val entry = new FingerEntry(start, next)
+            entry
+        }
+        def apply(start: Int, next: Int, node: NodeInfo): FingerEntry = {
+            val entry = new FingerEntry(start, next)
+            entry.node = node
+            entry
+        }
+    }
 
     class NodeInfo(nodeId: Int, nodePath: ActorPath) {
         val id = nodeId
